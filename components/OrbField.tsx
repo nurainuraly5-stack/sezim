@@ -27,14 +27,22 @@ export default function OrbField({ days, matches }: { days: Item[]; matches: (d:
   const layout = useMemo(() => {
     const small = size.w < 640;
     const base = small ? 118 : 168;
-    const gap = small ? 74 : 104;
-    return days.map((d, i) => {
+    const gap = small ? 92 : 132;
+    const raw = days.map((d, i) => {
       const a = i * 2.39996; // золотой угол
       const rad = i === 0 ? 0 : gap * Math.sqrt(i + 0.6);
       const s = base * (0.82 + d.mood.arousal * 0.18 + d.mood.valence * 0.12);
-      return { d, x: Math.cos(a) * rad, y: Math.sin(a) * rad * 0.82, s };
+      // портретный экран (телефон) — тянем спираль по вертикали
+      const tall = size.h / Math.max(1, size.w) > 1.2;
+      return { d, x: Math.cos(a) * rad * (tall ? 0.62 : 1), y: Math.sin(a) * rad * (tall ? 1.55 : 0.82), s };
     });
-  }, [days, size.w]);
+    // вписываем первые ~12 сфер в экран (дальние — перетаскиванием)
+    const near = raw.slice(0, 12);
+    const maxX = Math.max(1, ...near.map((o) => Math.abs(o.x) + o.s * 0.5));
+    const maxY = Math.max(1, ...near.map((o) => Math.abs(o.y) + o.s * 0.5 + 40));
+    const k = Math.min(1, (size.w / 2 - 12) / maxX, (size.h / 2 - 8) / maxY);
+    return raw.map((o) => ({ ...o, x: o.x * k, y: o.y * k, s: o.s * Math.max(0.75, k) }));
+  }, [days, size.w, size.h]);
 
   const orbs: OrbDraw[] = layout.map(({ d, x, y, s }) => ({
     id: d.id, tokens: d.tokens, contrast: d.mood.contrast,
@@ -77,10 +85,10 @@ export default function OrbField({ days, matches }: { days: Item[]; matches: (d:
             onClick={() => { if (!drag.current?.moved) router.push(`/day/${d.id}`); }}
           >
             <span
-              className="pointer-events-none absolute left-1/2 top-full mt-3 w-56 -translate-x-1/2 text-center transition-opacity duration-500"
+              className="pointer-events-none absolute left-1/2 top-full mt-2 w-40 -translate-x-1/2 text-center transition-opacity duration-500 sm:mt-3 sm:w-56"
               style={{ opacity: on ? (hover === d.id ? 1 : 0.78) : 0.3 }}
             >
-              <span className="block font-display text-[1.05rem] leading-tight text-ink">{d.mood.title}</span>
+              <span className="block font-display text-[0.92rem] leading-tight text-ink sm:text-[1.05rem]">{d.mood.title}</span>
               <span className="mt-1 block text-[0.68rem] uppercase tracking-[0.18em] text-mute">{formatDate(d.date)}</span>
             </span>
           </button>

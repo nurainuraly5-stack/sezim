@@ -13,11 +13,11 @@ export default function OrbCanvas({ orbs, className, fit }: { orbs: OrbDraw[]; c
 
   useEffect(() => {
     const canvas = ref.current!;
-    let r: OrbRenderer;
-    try { r = new OrbRenderer(canvas); } catch { return; }
+    let r: OrbRenderer | null = null;
     let raf = 0;
     const t0 = performance.now();
     const loop = () => {
+      if (!r) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const rect = canvas.getBoundingClientRect();
       r.resize(rect.width, rect.height, dpr);
@@ -27,8 +27,20 @@ export default function OrbCanvas({ orbs, className, fit }: { orbs: OrbDraw[]; c
       r.draw(list, (performance.now() - t0) / 1000, dpr);
       raf = requestAnimationFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(raf); r.dispose(); };
+    const start = () => {
+      try { r = new OrbRenderer(canvas); } catch (e) { console.error('orb shader', e); r = null; return; }
+      raf = requestAnimationFrame(loop);
+    };
+    // GPU может «уронить» контекст (слабые ноутбуки, много вкладок) — восстанавливаемся
+    const onLost = (e: Event) => { e.preventDefault(); cancelAnimationFrame(raf); r = null; };
+    canvas.addEventListener('webglcontextlost', onLost);
+    canvas.addEventListener('webglcontextrestored', start);
+    start();
+    return () => {
+      cancelAnimationFrame(raf);
+      canvas.removeEventListener('webglcontextlost', onLost);
+      canvas.removeEventListener('webglcontextrestored', start);
+    }; // без loseContext: StrictMode повторяет эффект на том же канвасе
   }, []);
 
   return <canvas ref={ref} className={className} style={{ width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }} />;

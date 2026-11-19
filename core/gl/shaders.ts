@@ -34,7 +34,7 @@ void main(){
   float R = 0.56 * (1.0 + 0.03*br + 0.05*u_hover) * u_birth;
   vec3 col = vec3(0.0); float a = 0.0;
   // ореол
-  float halo = exp(-max(r - R, 0.0) * 7.0) * (0.35 + 0.65*u_glow) * (0.85 + 0.15*br);
+  float halo = exp(-max(r - R, 0.0) * 7.0) * (0.35 + 0.65*u_glow) * (0.85 + 0.15*br) * smoothstep(1.0, 0.72, r);
   vec3 haloCol = mix(u_rim, u_core, 0.35);
   if (r < R) {
     vec2 q = p / R;
@@ -85,6 +85,8 @@ vec2 coverUV(vec2 uv, vec2 texRes){
   return (uv - 0.5) * s + 0.5;
 }
 float lum(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// GLSL ES 1.0: индексировать uniform-массив можно только константой/счётчиком цикла
+vec3 palAt(int i){ if(i<=0) return u_pal[0]; if(i==1) return u_pal[1]; if(i==2) return u_pal[2]; if(i==3) return u_pal[3]; return u_pal[4]; }
 
 vec3 kuwahara(sampler2D t, vec2 uv, vec2 px, float rad){
   vec3 m[4]; vec3 s[4];
@@ -136,13 +138,13 @@ vec3 shade(sampler2D t, vec2 texRes){
     float gx = lum(texture2D(t, uv+vec2(px.x,0.0)).rgb) - lum(texture2D(t, uv-vec2(px.x,0.0)).rgb);
     float gy = lum(texture2D(t, uv+vec2(0.0,px.y)).rgb) - lum(texture2D(t, uv-vec2(0.0,px.y)).rgb);
     float e = smoothstep(0.08, 0.22, length(vec2(gx, gy)) * (1.0 + u_sharp));
-    c = mix(c, post, 0.7);
-    c = mix(c, u_pal[0]*0.6, e*0.85);
+    c = mix(c, post, 0.55) * 1.15;
+    c = mix(c, u_pal[0]*0.6, e*0.75);
   } else if (u_tech == 2) {
     // Film Grain Night: лифт теней, ореолы, тёплые блики
     vec3 hal = vec3(0.0);
     for (int i=0;i<8;i++){ float a = float(i)*0.785; hal += max(texture2D(t, uv + vec2(cos(a),sin(a))*px*9.0).rgb - 0.6, 0.0); }
-    c = c + hal * vec3(0.9, 0.35, 0.15) * 0.35;
+    c = c * 1.3 + hal * vec3(0.9, 0.35, 0.15) * 0.4;
     c = mix(u_pal[0]*0.9 + c*0.9, c, smoothstep(0.0, 0.5, lum(c)));
     c = pow(c, vec3(1.08, 1.0, 0.94));
   } else if (u_tech == 3) {
@@ -185,7 +187,7 @@ void main(){
         float rr = 0.05 + hash(vec2(fi*3.1, u_seed))*0.18;
         float ring = smoothstep(0.004, 0.0, abs(length(p-cc) - rr));
         float disc = smoothstep(rr*0.5, rr*0.48, length(p-cc+vec2(0.03)));
-        c = mix(c, u_pal[1+int(mod(fi,4.0))], disc*0.35);
+        c = mix(c, palAt(1+int(mod(fi,4.0))), disc*0.35);
         c += u_pal[4] * ring * 0.4;
       }
       float ln = smoothstep(0.003, 0.0, abs(p.y - p.x*0.55 + 0.1)) + smoothstep(0.002, 0.0, abs(p.y + p.x*1.6 - 0.25));

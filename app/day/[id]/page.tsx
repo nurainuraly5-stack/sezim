@@ -24,12 +24,21 @@ export default function DayPage() {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  const [glFailed, setGlFailed] = useState(false);
+  const [fallbackUrl, setFallbackUrl] = useState('');
   const player = useRef<DayPlayer | null>(null);
 
   useEffect(() => {
     getDay(id).then((d) => { setDay(d ?? null); if (d) setTitle(d.mood.title); });
     return () => player.current?.stop();
   }, [id]);
+
+  useEffect(() => {
+    if (!glFailed || !day?.photos[0]) return;
+    const u = URL.createObjectURL(day.photos[0]);
+    setFallbackUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [glFailed, day]);
 
   if (day === undefined) return <main className="h-[100dvh] bg-bg" />;
   if (day === null) {
@@ -80,7 +89,15 @@ export default function DayPage() {
 
   return (
     <main className="relative h-[100dvh] overflow-hidden bg-bg">
-      <MemoryScene photos={d.photos} tokens={d.tokens} id={d.id} intensity={entered ? 1 : 0.35} />
+      {glFailed ? (
+        // без WebGL: честный простой вид — фото в палитре дня, без шейдерной обработки
+        <div className="absolute inset-0" style={{ background: `radial-gradient(80% 70% at 55% 40%, ${d.tokens.palette[1]}55, #07070b 75%)` }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {fallbackUrl && <img src={fallbackUrl} alt="" className="absolute left-1/2 top-[42%] max-h-[62%] max-w-[70%] -translate-x-1/2 -translate-y-1/2 rounded-[14px] object-cover opacity-80" />}
+        </div>
+      ) : (
+        <MemoryScene photos={d.photos} tokens={d.tokens} id={d.id} intensity={entered ? 1 : 0.35} onFail={() => setGlFailed(true)} />
+      )}
 
       {/* Постоянная рамка: шапка, дата, сфера */}
       <header className="absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-4 pt-5 md:px-10 md:pt-7">
@@ -101,7 +118,7 @@ export default function DayPage() {
       </div>
 
       {/* Название и подпись от руки */}
-      <section className="absolute inset-x-0 bottom-0 z-10 px-4 pb-24 md:px-10 md:pb-24">
+      <section className="absolute inset-x-0 bottom-0 z-10 px-4 pb-40 md:px-10 md:pb-24">
         <p className="mb-2 text-[0.68rem] uppercase tracking-[0.22em] text-mute sm:hidden">{formatDate(d.date)}</p>
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div className="max-w-3xl">
@@ -129,7 +146,7 @@ export default function DayPage() {
               <motion.p
                 initial={{ opacity: 0, clipPath: 'inset(0 100% 0 0)' }} animate={{ opacity: 1, clipPath: 'inset(0 0% 0 0)' }}
                 transition={{ duration: 3.2, delay: 1.2, ease: 'easeInOut' }}
-                className="hand max-w-md text-[1.7rem] leading-snug md:text-right md:text-[2.1rem]"
+                className="hand line-clamp-3 max-w-md text-[1.4rem] leading-snug md:text-right md:text-[2.1rem]"
                 style={{ color: d.tokens.orb.core, textShadow: '0 1px 18px rgba(0,0,0,0.6)' }}
               >
                 «{d.mood.quote}»
@@ -168,7 +185,7 @@ export default function DayPage() {
 
       {/* Встроенный плеер ссылки */}
       {embed && link?.embed && (
-        <div className="absolute bottom-16 left-4 z-30 w-[min(92vw,360px)] overflow-hidden rounded-[14px] border border-line bg-bg md:left-10">
+        <div className="absolute left-4 top-20 z-30 w-[min(92vw,340px)] overflow-hidden rounded-[14px] border border-line bg-bg md:left-10 md:top-24">
           <iframe src={link.embed} title="Песня дня" allow="autoplay; encrypted-media" className="block w-full"
             style={{ height: link.provider === 'spotify' ? 152 : link.provider === 'soundcloud' ? 120 : 200, border: 0 }} />
         </div>

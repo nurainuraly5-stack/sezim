@@ -22,7 +22,10 @@ export default function ArchivePage() {
     try { const v = localStorage.getItem('sezim:view'); if (v === 'strip' || v === 'orbs') setView(v); } catch {}
     (async () => {
       try {
-        await seedIfEmpty((i, n) => setSeeding(i < n ? [i, n] : null));
+        await seedIfEmpty(async (i, n) => {
+          setSeeding(i < n ? [i, n] : null);
+          setDays(await listDays());
+        });
       } catch (e) {
         console.warn('seed failed', e);
       }
@@ -71,7 +74,7 @@ export default function ArchivePage() {
       </div>
 
       <section className="relative min-h-0 flex-1">
-        {seeding && (
+        {seeding && !days?.length && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
             <motion.span
               className="h-24 w-24 rounded-full"
@@ -79,8 +82,11 @@ export default function ArchivePage() {
               animate={{ scale: [0.9, 1.05, 0.9], opacity: [0.7, 1, 0.7] }}
               transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
             />
-            <p className="label">{S.seeding} {seeding[0] + 1}/{seeding[1]}</p>
+            <p className="label">{S.seeding}</p>
           </div>
+        )}
+        {seeding && !!days?.length && (
+          <p className="label pointer-events-none absolute inset-x-0 bottom-2 z-10 text-center">{S.seeding} {seeding[0]}/{seeding[1]}</p>
         )}
         {days && days.length === 0 && !seeding && (
           <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">

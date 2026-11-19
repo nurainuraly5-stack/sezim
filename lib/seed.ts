@@ -50,26 +50,25 @@ export const SEED: SeedDay[] = [
 let running: Promise<void> | null = null;
 
 /** Автозагрузка при пустой базе. onProgress(i, n) — для анимации «собираем архив». */
-export function seedIfEmpty(onProgress?: (i: number, n: number) => void): Promise<void> {
+export function seedIfEmpty(onProgress?: (i: number, n: number) => void | Promise<void>): Promise<void> {
   if (running) return running;
   running = (async () => {
     if ((await db.days.count()) > 0) return;
     if (readFlag()) return; // пользователь удалил seed — не возвращаем
     for (let i = 0; i < SEED.length; i++) {
-      onProgress?.(i, SEED.length);
       const s = SEED[i];
       const raw = await Promise.all(s.photos.map((p) => fetch(p).then((r) => r.blob())));
-      const photos = await Promise.all(raw.map((b) => resizePhoto(b, 1400)));
+      const photos = await Promise.all(raw.map((b) => resizePhoto(b, 1000)));
       const photoFeatures = await analyzePhotos(photos);
-      const buf = await renderSong(s.song);
+      const buf = await renderSong({ ...s.song, seconds: 12 });
       const audio = await analyzeAudioBuffer(buf);
       await createDay({
         text: s.text, photos, photoFeatures, date: s.date, audio,
         song: { kind: 'file', file: toWav(buf), fileName: 'song.wav', meta: { title: s.song.title, artist: 'Sezim procedural (CC0)', year: 2026 } },
       }, { seed: true, createdAt: Date.parse(s.date), titleOverride: s.title });
+      await onProgress?.(i + 1, SEED.length); // сферы появляются по одной
     }
     try { localStorage.setItem('sezim:seeded', '1'); } catch {}
-    onProgress?.(SEED.length, SEED.length);
   })().finally(() => { running = null; });
   return running;
 }

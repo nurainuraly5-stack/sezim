@@ -69,6 +69,12 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const clean = (s: string) => s.replace(/^(но|и|а|да|зато|однако)\s+/i, '').replace(/[«»"“”]/g, '').replace(/[\s,;:—–-]+$/g, '').replace(/[.!?…]+$/g, '').trim();
 
 export function fallbackTitle(sentence: string, motif?: string): string {
+  // сначала — целая клауза (между запятыми) с сенсорной деталью, 3–7 слов
+  const clauses = sentence.split(/[,;:—–]/).map((c) => clean(c)).filter(Boolean);
+  const stem = motif?.slice(0, 4);
+  const good = clauses.find((c) => { const n = c.split(/\s+/).length; return n >= 3 && n <= 7 && (!stem || norm(c).includes(stem)); })
+    || clauses.find((c) => { const n = c.split(/\s+/).length; return n >= 3 && n <= 7; });
+  if (good) return cap(good.toLowerCase());
   const words = clean(sentence).split(/\s+/).filter(Boolean);
   if (words.length <= 7) return cap(words.join(' ').toLowerCase().replace(/^./, (c) => c));
   let idx = motif ? words.findIndex((w) => norm(w).startsWith(motif.slice(0, 4))) : -1;

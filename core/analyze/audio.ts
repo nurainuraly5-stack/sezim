@@ -76,12 +76,13 @@ export async function analyzeAudioBuffer(ab: AudioBuffer, maxSeconds = 45): Prom
   let prev = new Float32Array(half);
   const flux: number[] = [];
   const chroma = new Array(12).fill(0);
+  const bass = new Array(12).fill(0); // бас (40–260 Гц) — подсказка тоники
   let rmsSum = 0, centSum = 0, centW = 0, frames = 0;
   // таблица высот для бинов
   const pcOfBin = new Int8Array(half).fill(-1);
   for (let b = 1; b < half; b++) {
     const f = (b * sr) / N;
-    if (f < 65 || f > 2100) continue;
+    if (f < 40 || f > 2100) continue;
     pcOfBin[b] = (((Math.round(12 * Math.log2(f / 440) + 69) % 12) + 12) % 12);
   }
 
@@ -97,7 +98,8 @@ export async function analyzeAudioBuffer(ab: AudioBuffer, maxSeconds = 45): Prom
       cur[b] = lm;
       const d = lm - prev[b]; if (d > 0) fl += d;
       num += m * ((b * sr) / N); den += m;
-      const pc = pcOfBin[b]; if (pc >= 0) chroma[pc] += m * m;
+      const pc = pcOfBin[b];
+      if (pc >= 0) { const f = (b * sr) / N; if (f >= 65) chroma[pc] += m * m; if (f <= 260) bass[pc] += m * m; }
     }
     prev = cur;
     flux.push(fl);
@@ -140,18 +142,23 @@ export async function analyzeAudioBuffer(ab: AudioBuffer, maxSeconds = 45): Prom
   if (bpm < 70) bpm *= 2; if (bpm > 180) bpm /= 2;
   const tempoConf = clamp((acf[bi] / (acf0 || 1)) * 2.5);
 
-  // лад
-  let bestMaj = -2, bestMin = -2, kMaj = 0, kMin = 0;
+  // лад: корреляция с профилями Крумхансла + вес тоники в басу (разводит параллельные мажор/минор)
+  const bassMax = Math.max(...bass) || 1;
+  let best = -9, bestK = 0, bestMode: 'major' | 'minor' = 'major', bestMaj = -2, bestMin = -2;
   for (let k = 0; k < 12; k++) {
     const rot = chroma.map((_, i) => chroma[(i + k) % 12]);
     const cm = pearson(rot, MAJOR), cn = pearson(rot, MINOR);
-    if (cm > bestMaj) { bestMaj = cm; kMaj = k; }
-    if (cn > bestMin) { bestMin = cn; kMin = k; }
+    bestMaj = Math.max(bestMaj, cm); bestMin = Math.max(bestMin, cn);
+    const tonic = 0.35 * (bass[k] / bassMax);
+    if (cm + tonic > best) { best = cm + tonic; bestK = k; bestMode = 'major'; }
+    if (cn + tonic > best) { best = cn + tonic; bestK = k; bestMode = 'minor'; }
   }
-  const diff = bestMaj - bestMin;
-  const modeConf = clamp(Math.abs(diff) * 6);
-  const mode: AudioFeatures['mode'] = modeConf < 0.12 ? 'unknown' : diff > 0 ? 'major' : 'minor';
-  const key = mode === 'unknown' ? undefined : mode === 'major' ? `${NOTES[kMaj]} major` : `${NOTES[kMin]} minor`;
+  // уверенность: насколько выбранный лад лучше параллельного (та же тоника)
+  const rotB = chroma.map((_, i) => chroma[(i + bestK) % 12]);
+  const sep = Math.abs(pearson(rotB, MAJOR) - pearson(rotB, MINOR));
+  const modeConf = clamp(sep * 4 + Math.abs(bestMaj - bestMin) * 2);
+  const mode: AudioFeatures['mode'] = modeConf < 0.12 ? 'unknown' : bestMode;
+  const key = mode === 'unknown' ? undefined : `${NOTES[bestK]} ${bestMode}`;
 
   const rmsMean = rmsSum / frames;
   const db = 20 * Math.log10(rmsMean + 1e-9);

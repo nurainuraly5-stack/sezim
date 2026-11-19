@@ -37,8 +37,9 @@ export function compose(tech: TechniqueId, W: number, H: number, n: number): Rec
   }
 }
 
-export default function MemoryScene({ photos, tokens, id, intensity }: {
+export default function MemoryScene({ photos, tokens, id, intensity, onFail }: {
   photos: Blob[]; tokens: StyleTokens; id: string; intensity: number; // 0..1: до «Войти» сцена приглушена
+  onFail?: () => void;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const live = useRef({ tokens, intensity });
@@ -46,9 +47,17 @@ export default function MemoryScene({ photos, tokens, id, intensity }: {
 
   useEffect(() => {
     const canvas = ref.current!;
+    let raf = 0;
+    let alive = true;
+    const onLost = (e: Event) => { e.preventDefault(); cancelAnimationFrame(raf); };
+    const onRestored = () => { if (alive) setup(); };
+    canvas.addEventListener('webglcontextlost', onLost);
+    canvas.addEventListener('webglcontextrestored', onRestored);
+    const setup = () => {
     const gl = canvas.getContext('webgl', { premultipliedAlpha: true, antialias: true });
-    if (!gl) return;
-    const prog = compile(gl, VERT, SCENE_FRAG);
+    if (!gl) { onFail?.(); return; }
+    let prog: WebGLProgram;
+    try { prog = compile(gl, VERT, SCENE_FRAG); } catch (e) { console.error('scene shader', e); onFail?.(); return; }
     gl.useProgram(prog);
     quad(gl, prog);
     const u = uniforms(gl, prog);
@@ -57,7 +66,6 @@ export default function MemoryScene({ photos, tokens, id, intensity }: {
     u.i('u_tex0', 0); u.i('u_tex1', 1);
 
     let texs: { tex: WebGLTexture; w: number; h: number }[] = [];
-    let alive = true;
     Promise.all(photos.slice(0, 8).map((p) => loadTexture(gl, p).catch(() => null))).then((r) => {
       if (alive) texs = r.filter(Boolean) as typeof texs;
     });
@@ -65,7 +73,6 @@ export default function MemoryScene({ photos, tokens, id, intensity }: {
     const seed = (parseInt(hashString(id), 36) % 1000) / 53;
     const t0 = performance.now();
     let shown = 0; // плавное «вхождение»
-    let raf = 0;
     const loop = () => {
       const { tokens: tk, intensity: target } = live.current;
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5); // шейдер Кувахары тяжёлый
@@ -124,10 +131,14 @@ export default function MemoryScene({ photos, tokens, id, intensity }: {
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
+    };
+    setup();
     return () => {
       alive = false;
       cancelAnimationFrame(raf);
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      canvas.removeEventListener('webglcontextlost', onLost);
+      canvas.removeEventListener('webglcontextrestored', onRestored);
+      // контекст не «теряем» вручную: в StrictMode эффект повторяется на том же канвасе
     };
   }, [photos, id]);
 

@@ -8,7 +8,7 @@ export type SynthSpec = {
 const midi = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
 
 export async function renderSong(spec: SynthSpec): Promise<AudioBuffer> {
-  const sr = 32000;
+  const sr = 22050;
   const secs = spec.seconds ?? 18;
   const ctx = new OfflineAudioContext(2, sr * secs, sr);
   const beat = 60 / spec.bpm;
@@ -16,8 +16,9 @@ export async function renderSong(spec: SynthSpec): Promise<AudioBuffer> {
   master.gain.value = 0.5;
   master.connect(ctx.destination);
 
-  const scale = spec.mode === 'major' ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10];
-  const prog = spec.mode === 'major' ? [0, 4, 5, 3] : [0, 5, 2, 6]; // I–V–vi–IV / i–VI–III–VII
+  const scale = spec.mode === 'major' ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 11]; // минор — гармонический
+  // каденции с явной тоникой: I–IV–V–I / i–iv–V–i (гармонический минор на V — однозначный лад)
+  const prog = spec.mode === 'major' ? [0, 3, 4, 0] : [0, 3, 4, 0];
   const triad = (deg: number) => [0, 2, 4].map((k) => {
     const d = deg + k;
     return spec.root + scale[d % 7] + 12 * Math.floor(d / 7);
@@ -33,7 +34,7 @@ export async function renderSong(spec: SynthSpec): Promise<AudioBuffer> {
     const t = b * beat * 4;
     for (const n of triad(prog[b % 4])) {
       const o = ctx.createOscillator();
-      o.type = spec.energy > 0.5 ? 'sawtooth' : 'triangle';
+      o.type = 'triangle'; // мало гармоник — хрома не искажается; энергию несут ударные
       o.frequency.value = midi(n);
       const g = ctx.createGain();
       g.gain.setValueAtTime(0, t);

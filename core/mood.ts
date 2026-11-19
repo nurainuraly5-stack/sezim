@@ -48,7 +48,7 @@ export function buildMood(text: TextFeatures, photo?: PhotoFeatures, audio?: Aud
   if ((mode === 'major' && text.valence < 0.35) || (mode === 'minor' && text.valence > 0.7)) mode = 'mixed';
 
   let daypart = text.daypart;
-  if (daypart === 'unknown' && photo) daypart = photo.brightness < 0.22 ? 'night' : photo.brightness > 0.6 ? 'day' : 'unknown';
+  if (daypart === 'unknown' && photo) daypart = photo.brightness < 0.14 ? 'night' : photo.brightness > 0.6 ? 'day' : 'unknown';
 
   return {
     valence, arousal, warmth, density,

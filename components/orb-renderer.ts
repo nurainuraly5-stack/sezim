@@ -58,18 +58,15 @@ export class OrbRenderer {
     }
   }
 
-  dispose() {
-    this.gl.getExtension('WEBGL_lose_context')?.loseContext();
-  }
 }
 
-/** Снимок сферы в JPEG (thumb.jpg папки дня). */
+/** Снимок сферы в JPEG (thumb.jpg папки дня): временный контекст, освобождается сразу. */
 export async function renderOrbSnapshot(tokens: StyleTokens, contrast: number, size = 256): Promise<Blob> {
   const c = document.createElement('canvas');
   c.width = size; c.height = size;
   const r = new OrbRenderer(c, { preserve: true });
   r.draw([{ x: size / 2, y: size / 2, size, tokens, contrast, id: tokens.orb.core + tokens.orb.rim }], 1.3, 1, { opaqueBg: '#07070b' });
   const blob = await new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('toBlob'))), 'image/jpeg', 0.9));
-  r.dispose();
+  r.gl.getExtension('WEBGL_lose_context')?.loseContext(); // не держим лишний контекст
   return blob;
 }
