@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import Logo from '@/components/Logo';
-import OrbCanvas from '@/components/OrbCanvas';
+import Orb from '@/components/Orb';
+import { orbParams } from '@/core/orb';
 import WhyPanel from '@/components/WhyPanel';
 import { S } from '@/core/strings';
 import { analyzePhotos, resizePhoto } from '@/core/analyze/photo';
@@ -28,6 +29,8 @@ const TEMPOS = [{ label: 'медленно', bpm: 76 }, { label: 'средне',
 export default function NewDayPage() {
   const router = useRouter();
   const [text, setText] = useState('');
+  // время создания черновика входит в сид: сохранённая сфера совпадает с превью
+  const [draftAt] = useState(() => Date.now());
   const [date, setDate] = useState(today);
   const [photos, setPhotos] = useState<Blob[]>([]);
   const [thumbs, setThumbs] = useState<string[]>([]);
@@ -107,6 +110,9 @@ export default function NewDayPage() {
   const debText = useDebounced(text, 250);
   const preview = useMemo(() => previewStyle(debText, photoFeatures, audio, meta), [debText, photoFeatures, audio, meta]);
   const hasSong = songKind === 'file' ? !!file : !!link;
+  const previewOrb = useMemo(() => orbParams({
+    text: debText.trim(), createdAt: draftAt, mood: preview.mood, tokens: preview.tokens, photo: photoFeatures, audio, meta,
+  }), [debText, draftAt, preview, photoFeatures, audio, meta]);
 
   async function submit() {
     const errs: string[] = [];
@@ -124,7 +130,7 @@ export default function NewDayPage() {
         song: songKind === 'file'
           ? { kind: 'file', file, fileName: file?.name, meta: { ...meta, year: yearNum } }
           : { kind: 'link', url: url.trim(), meta: { ...meta, year: yearNum } },
-      });
+      }, { createdAt: draftAt });
       router.push(`/day/${day.id}?new=1`);
     } catch (e) {
       console.error(e);
@@ -134,8 +140,6 @@ export default function NewDayPage() {
       clearInterval(timer);
     }
   }
-
-  const orbSize = creating ? 1 : 0.82;
 
   return (
     <main className="relative min-h-[100dvh] pb-16">
@@ -250,10 +254,8 @@ export default function NewDayPage() {
         <aside className="md:sticky md:top-8 md:self-start" aria-label={S.livePreview}>
           <p className="label">{S.livePreview}</p>
           <div className="relative mx-auto mt-2 aspect-square w-full max-w-[420px]">
-            <OrbCanvas fit orbs={[{
-              id: 'preview', x: 0, y: 0, size: orbSize, tokens: preview.tokens, contrast: preview.mood.contrast,
-              speed: creating ? 3 : undefined, hover: creating ? 1 : 0,
-            }]} />
+            <Orb params={previewOrb} size={360} live hover={creating} speed={creating ? 3 : 1}
+              className="mx-auto max-w-full" style={{ height: 'auto', aspectRatio: '1' }} />
             <AnimatePresence>
               {creating && (
                 <motion.p key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}

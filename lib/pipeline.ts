@@ -5,7 +5,9 @@ import { buildMood } from '@/core/mood';
 import { buildStyle } from '@/core/style-engine';
 import { hashString } from '@/core/color';
 import { cacheGet, cacheSet, newId, putDay } from './db';
-import { renderOrbSnapshot } from '@/components/orb-renderer';
+import { ORB_RENDER_VERSION, renderOrbBlob } from '@/components/orb-engine';
+import { orbParams } from '@/core/orb';
+import { orbSize } from '@/design/tokens';
 
 export type DraftInputs = {
   text: string;
@@ -107,12 +109,16 @@ export async function createDay(input: DraftInputs, opts: { titleOverride?: stri
   const mood = buildMood(text, input.photoFeatures, input.audio);
   const { tokens, explain } = buildStyle({ mood, text, photo: input.photoFeatures, audio: input.audio, meta });
   const voice = opts.seed || !(await isTtsConfigured()) ? undefined : await renderVoice(voiceScript(mood.title, mood.quote), mood.voiceStyle.pace, mood.voiceStyle.warmth);
-  const thumb = await renderOrbSnapshot(tokens, mood.contrast, 256).catch(() => undefined);
+  const createdAt = opts.createdAt ?? Date.now();
+  // миниатюра сферы рендерится один раз при создании дня — архив показывает её без живого шейдера
+  const thumb = await renderOrbBlob(orbParams({
+    text: input.text, createdAt, mood, tokens, photo: input.photoFeatures, audio: input.audio, meta,
+  }), orbSize.thumb).catch(() => undefined);
 
   const day: DayEntry = {
     id: opts.id ?? newId(), date: input.date, text: input.text, photos: input.photos,
     song: { ...input.song, meta, analysis: input.audio },
-    mood, tokens, explain, voice, thumb, createdAt: opts.createdAt ?? Date.now(),
+    mood, tokens, explain, voice, thumb, thumbV: thumb ? ORB_RENDER_VERSION : undefined, createdAt,
     analysisEngine: text.engine, photoFeatures: input.photoFeatures, seed: opts.seed,
   };
   await putDay(day);

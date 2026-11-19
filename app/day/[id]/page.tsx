@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
 import Logo from '@/components/Logo';
 import MemoryScene from '@/components/MemoryScene';
-import OrbCanvas from '@/components/OrbCanvas';
+import Orb from '@/components/Orb';
+import { orbParams, orbSource } from '@/core/orb';
 import WhyPanel from '@/components/WhyPanel';
 import { deleteDay, getDay, putDay } from '@/lib/db';
 import { DayPlayer, type VoiceMode } from '@/lib/player';
@@ -145,7 +146,7 @@ export default function DayPage() {
       </header>
 
       <div className="pointer-events-none absolute right-3 top-16 z-10 h-28 w-28 md:right-8 md:top-20 md:h-36 md:w-36" aria-hidden>
-        <OrbCanvas fit orbs={[{ id: d.id, x: 0, y: 0, size: 1, tokens: d.tokens, contrast: d.mood.contrast }]} />
+        <Orb params={orbParams(orbSource(d))} size={144} live className="h-full w-full" style={{ width: '100%', height: '100%' }} />
       </div>
 
       {/* Название и подпись от руки */}

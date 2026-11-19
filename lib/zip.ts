@@ -35,7 +35,7 @@ export async function exportDayZip(d: DayEntry): Promise<Blob> {
   if (file) root.file(`song.${extOf(file, d.song.fileName)}`, file);
   root.file('memory.json', JSON.stringify({ mood: d.mood, tokens: d.tokens, explain: d.explain, photoFeatures: d.photoFeatures }, null, 2));
   if (d.voice) root.file(`voice.${extOf(d.voice)}`, d.voice);
-  if (d.thumb) root.file('thumb.jpg', d.thumb);
+  if (d.thumb) root.file(`thumb.${extOf(d.thumb)}`, d.thumb);
   return zip.generateAsync({ type: 'blob' });
 }
 

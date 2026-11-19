@@ -21,51 +21,160 @@ void main(){
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
 }`;
 
-export const ORB_FRAG = /* glsl */ `
+/**
+ * Сфера дня — один шейдер, всё задают uniform-параметры из core/orb.ts (OrbParams).
+ * Постоянное у всех сфер: круглый силуэт, подсветка по краю, тень под сферой, геометрия кадра.
+ * Переменное: цвета слоёв, тяжесть, деформация, структура (полосы/вихрь/частицы/прожилки), зерно, свет, кольца.
+ * lite — упрощённый вариант для телефонов (меньше октав шума, без прожилок).
+ */
+export const orbFrag = (lite: boolean) => /* glsl */ `
 precision highp float;
+${lite ? '#define LITE' : ''}
+#ifdef LITE
+#define OCT 3
+#else
+#define OCT 5
+#endif
 varying vec2 v_uv;
-uniform float u_time, u_glow, u_breath, u_contrast, u_grain, u_seed, u_speed, u_hover, u_opaque, u_birth;
-uniform vec3 u_core, u_rim, u_bg;
-${NOISE}
-void main(){
-  vec2 p = v_uv*2.0 - 1.0;
-  float r = length(p);
-  float br = sin(u_time * u_breath * 6.2831853);
-  float R = 0.56 * (1.0 + 0.03*br + 0.05*u_hover) * u_birth;
-  vec3 col = vec3(0.0); float a = 0.0;
-  // ореол
-  float halo = exp(-max(r - R, 0.0) * 7.0) * (0.35 + 0.65*u_glow) * (0.85 + 0.15*br) * smoothstep(1.0, 0.72, r);
-  vec3 haloCol = mix(u_rim, u_core, 0.35);
-  if (r < R) {
-    vec2 q = p / R;
-    float z = sqrt(max(1.0 - dot(q,q), 0.0));
-    float fres = pow(1.0 - z, 2.4);
-    float t = u_time * 0.06 * (0.6 + u_speed);
-    vec2 w = q*1.6 + vec2(fbm(q*2.0 + t + u_seed), fbm(q*2.0 - t + u_seed*1.7));
-    float flow = fbm(w*1.8 + vec2(t*0.7, -t*0.5));
-    // ядро: при высоком противоречии — компактное и отдельное, при низком — разливается
-    float coreR = mix(0.95, 0.5, u_contrast);
-    float d = length(q + 0.22*(vec2(flow, fbm(w + 3.1)) - 0.5));
-    float coreMask = smoothstep(coreR, coreR*0.15, d);
-    vec3 shell = u_rim * (0.35 + 0.45*flow);
-    col = mix(shell, u_core * (0.9 + 0.4*flow), coreMask);
-    col += u_rim * fres * 1.5;                 // подсветка по краю
-    col *= 0.62 + 0.38*z;                      // объём
-    float spec = pow(max(dot(normalize(vec3(q, z)), normalize(vec3(-0.45, 0.55, 0.7))), 0.0), 28.0);
-    col += vec3(1.0, 0.97, 0.92) * spec * 0.45;
-    col += u_core * coreMask * 0.25 * (0.7 + 0.3*br) * u_glow;
-    float edge = smoothstep(R, R - 0.012, r);
-    col = mix(haloCol*halo, col, edge);
-    a = max(edge, halo);
-  } else {
-    col = haloCol * halo;
-    a = halo;
+uniform float u_time, u_px, u_hover, u_birth;
+uniform vec3 u_core, u_shell, u_accent;
+uniform float u_contrast, u_depth, u_deform, u_dfreq;
+uniform vec4 u_struct;   // полосы, вихрь, частицы, прожилки
+uniform float u_bandAngle, u_flow, u_grain, u_breath, u_spin, u_glow, u_rimLight, u_moons;
+uniform vec2 u_offset, u_swirlC;
+uniform vec4 u_light;    // x, y, сила, теплота
+uniform vec4 u_ring;     // число, радиус, наклон, поворот
+uniform vec3 u_frame;    // центр x, центр y, радиус — доли кадра
+uniform float u_shadowY;
+
+// хэш с малыми множителями (Hoskins): у соседних клеток решётки нет расхождений от потери точности,
+// иначе компилятор (ANGLE/HLSL) переставляет операции и на границах клеток силуэт рвётся
+float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y)*p3.z); }
+float noise(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),u.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y); }
+float fbm(vec2 p){ float v=0.0, a=0.5; for(int i=0;i<OCT;i++){ v+=a*noise(p); p=p*2.03+vec2(1.7,9.2); a*=0.5; } return v; }
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,s,-s,c); }
+
+// Кольца и «луны» (события дня): x — передняя половина, y — задняя (за сферой)
+vec2 rings(vec2 p, float px){
+  vec2 res = vec2(0.0);
+  for (int i=0;i<3;i++){
+    float fi = float(i);
+    if (fi >= u_ring.x) break;
+    float sc = u_ring.y + fi*0.1;
+    float tilt = u_ring.z + fi*0.05;
+    vec2 pr = rot(-(u_ring.w + fi*0.18)) * p;
+    float e = length(vec2(pr.x, pr.y/tilt));
+    vec2 gv = vec2(pr.x, pr.y/(tilt*tilt)) / max(e, 1e-4);
+    float dd = abs(e - sc) / max(length(gv), 1e-4);
+    float w = 0.011 - fi*0.002;
+    float a = smoothstep(w + px, w, dd) * (0.62 - fi*0.14);
+    if (pr.y > 0.0) res.y = max(res.y, a); else res.x = max(res.x, a);
+    if (i == 0) {
+      for (int k=0;k<6;k++){
+        float fk = float(k);
+        if (fk >= u_moons) break;
+        float th = fk/max(u_moons,1.0)*6.2831853 + u_time*0.12*u_flow + u_offset.x;
+        vec2 mp = vec2(sc*cos(th), sc*tilt*sin(th));
+        float md = length(pr - mp);
+        float ma = smoothstep(0.05 + px, 0.05, md) * 0.9;
+        if (sin(th) > 0.0) res.y = max(res.y, ma); else res.x = max(res.x, ma);
+      }
+    }
   }
-  // плёночное зерно
-  float g = hash(gl_FragCoord.xy + fract(u_time*7.0)*100.0) - 0.5;
-  col += g * (0.04 + u_grain*0.12) * a;
-  if (u_opaque > 0.5) { col = u_bg*(1.0-a) + col; a = 1.0; }
-  gl_FragColor = vec4(col, a);
+  return res;
+}
+
+vec4 over(vec4 top, vec4 base){ return top + base*(1.0 - top.a); }
+
+void main(){
+  vec2 p0 = vec2(v_uv.x - u_frame.x, u_frame.y - v_uv.y) / u_frame.z; // y вверх, единица — радиус
+  float br = sin(u_time*u_breath*6.2831853);
+  float sc = max((1.0 + 0.022*br + 0.045*u_hover) * u_birth, 1e-3);
+  vec2 p = p0 / sc;
+  float px = u_px / sc;
+  float t = u_time;
+
+  // Силуэт: круг с лёгкой деформацией шумом (амплитуда — от возбуждения дня)
+  float r = length(p);
+  vec2 dir = p / max(r, 1e-4);
+  float rr = 1.0 + u_deform * (noise(dir*u_dfreq + u_offset + t*0.08) - 0.5) * 2.0;
+  float body = smoothstep(rr + px*1.2, rr - px*1.2, r);
+
+  // Тень под сферой — постоянный элемент
+  vec2 sp = vec2(p0.x/0.95, (p0.y + u_shadowY)/0.16);
+  float sh = exp(-dot(sp, sp)*1.7) * 0.3 * u_birth;
+  vec4 acc = vec4(mix(u_shell, vec3(0.12, 0.09, 0.2), 0.6) * sh, sh);
+
+  // Ореол
+  float halo = exp(-max(r - rr, 0.0)*6.5) * (0.12 + 0.38*u_glow) * smoothstep(1.7, 1.0, r) * (1.0 - body) * (1.0 - 0.4*u_depth);
+  acc = over(vec4(mix(u_shell, u_core, 0.4)*halo, halo), acc);
+
+  vec3 ringCol = mix(mix(u_shell, u_accent, 0.25), vec3(1.0), 0.5) * (1.0 - 0.4*u_depth);
+  vec2 rg = u_ring.x > 0.0 ? rings(p, px) : vec2(0.0);
+  acc = over(vec4(ringCol*rg.y*0.7, rg.y*0.7), acc); // задняя половина колец — за сферой
+
+  if (body > 0.0) {
+    vec2 q = p / rr;
+    float z = sqrt(max(1.0 - dot(q, q), 0.0));
+    vec3 n = normalize(vec3(q, z));
+    // координаты на поверхности: вращение от темпа песни
+    float lon = atan(n.x, n.z) + t*u_spin*u_flow;
+    float lat = asin(clamp(n.y, -1.0, 1.0));
+    vec2 s = vec2(lon*0.95, lat*1.1);
+    // вихрь вокруг своего центра
+    vec2 sq = q - u_swirlC;
+    float sw = u_struct.y * 3.2 * u_flow * (1.0 - smoothstep(0.0, 1.2, length(sq)));
+    vec2 wq = rot(sw + t*0.05*u_flow*u_struct.y) * sq;
+    vec2 base = mix(s, wq*1.3, 0.5)*1.6 + u_offset;
+    float f = fbm(base + vec2(t*0.03, -t*0.02));
+    float f2 = fbm(base*1.7 + f*1.4 + 3.1);
+
+    // ядро и оболочка: при противоречии ядро компактное и отдельное
+    float coreR = mix(0.95, 0.45, u_contrast);
+    float d = length(q + 0.25*(vec2(f, f2) - 0.5));
+    float coreMask = smoothstep(coreR, coreR*0.2, d);
+    vec3 col = mix(u_shell*(0.55 + 0.55*f), u_core*(0.85 + 0.35*f2), coreMask);
+
+    // полосы
+    vec2 bd = vec2(cos(u_bandAngle), sin(u_bandAngle));
+    float b = 0.5 + 0.5*sin(dot(s, bd)*(5.0 + u_struct.x*9.0) + f*4.0 + t*u_spin*2.0);
+    col = mix(col, mix(u_accent, u_core, 0.35)*1.05, smoothstep(0.55, 0.9, b)*u_struct.x*0.5);
+    // вихревые пряди
+    float st = smoothstep(0.35, 0.75, f2) * smoothstep(1.0, 0.2, length(sq));
+    col = mix(col, mix(u_core, vec3(1.0), 0.25), st*u_struct.y*0.35);
+#ifndef LITE
+    // прожилки
+    float v = pow(1.0 - abs(fbm(base*2.3 + 7.7)*2.0 - 1.0), 10.0);
+    col = mix(col, u_accent*1.2 + 0.08, v*u_struct.w*0.75);
+#endif
+    // частицы
+    vec2 g = s*(9.0 + u_struct.z*9.0) + u_offset*3.0;
+    vec2 gi = floor(g), gf = fract(g) - 0.5;
+    float hs = hash(gi);
+    float dm = step(1.0 - u_struct.z*0.55, hs) * smoothstep(0.18, 0.04, length(gf + (vec2(hash(gi + 3.1), hash(gi + 7.3)) - 0.5)*0.5));
+    col += mix(u_core, vec3(1.0), 0.6) * dm * (0.6 + 0.4*sin(t*2.0 + hs*30.0)) * 0.7 * smoothstep(0.0, 0.3, z);
+
+    // тяжесть дня: затемнение и приглушение
+    col *= 1.0 - u_depth*0.68;
+    col = mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))), u_depth*0.25);
+
+    // свет по времени суток
+    vec3 L = normalize(vec3(u_light.x, u_light.y, 0.75));
+    float diff = max(dot(n, L), 0.0);
+    col *= 0.55 + 0.6*diff*u_light.z + 0.15*(1.0 - u_light.z);
+    vec3 tint = mix(vec3(0.86, 0.9, 1.0), vec3(1.0, 0.86, 0.7), u_light.w);
+    col += tint * pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 36.0) * 0.55 * u_light.z;
+    col += tint * pow(diff, 6.0) * 0.12 * u_light.z;
+    // подсветка по краю — постоянный элемент
+    col += mix(u_shell, vec3(1.0), 0.45) * pow(1.0 - z, 2.6) * (0.45 + 0.5*u_rimLight);
+    col += u_core * coreMask * 0.22 * u_glow * (0.85 + 0.15*br) * (1.0 - 0.5*u_depth);
+    // зерно от энергии песни
+    col += (hash(gl_FragCoord.xy + floor(t*24.0)*17.0) - 0.5) * (0.03 + u_grain*0.14);
+    acc = over(vec4(clamp(col, 0.0, 1.0)*body, body), acc);
+  }
+  acc = over(vec4(ringCol*rg.x*0.85, rg.x*0.85), acc); // передняя половина колец
+  gl_FragColor = acc;
 }`;
 
 // u_pass: 0 — фон, 1 — фото. u_tech: 0 softStrokes, 1 geometric, 2 filmNight, 3 ma, 4 collage.

@@ -120,9 +120,12 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
   rim = adjust(rim, { sat: 1.1, light: 0.05 });
   // при низком противоречии ядро и оболочка сближаются
   core = mix(rim, core, clamp(0.35 + mood.contrast));
-  // защита от слишком тёмной сферы
-  const [ch, cs, cl] = hexToHsl(core); core = hslToHex([ch, cs, Math.max(cl, 0.5)]);
-  const [rh, rs, rl] = hexToHsl(rim); rim = hslToHex([rh, rs, Math.max(rl, 0.38)]);
+  // температура видна только при насыщенности: чем дальше слой от нейтрали, тем насыщеннее он должен быть
+  // (иначе «тёплое ядро» серых фото остаётся серым и смешанное состояние не читается)
+  const minSat = (t: number) => clamp(Math.abs(t - 0.5) * 1.1 + mood.contrast * 0.25, 0, 0.7);
+  // защита от слишком тёмных цветов слоёв (тяжесть дня передаёт затемнение сферы, а не грязный цвет)
+  const [ch, cs, cl] = hexToHsl(core); core = hslToHex([ch, Math.max(cs, minSat(innerT)), Math.max(cl, 0.5)]);
+  const [rh, rs, rl] = hexToHsl(rim); rim = hslToHex([rh, Math.max(rs, minSat(outerT)), Math.max(rl, 0.38)]);
 
   // 4. Числовые токены
   const year = meta?.year;

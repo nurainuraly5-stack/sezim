@@ -3,16 +3,18 @@
 // с подписью под ней, поэтому ни сферы, ни подписи не пересекаются. Лишнее по высоте — прокрутка.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import OrbCanvas from './OrbCanvas';
-import type { OrbDraw } from './orb-renderer';
+import Orb from './Orb';
+import { ORB_RENDER_VERSION } from './orb-engine';
+import { orbParams, orbSource } from '@/core/orb';
+import { orbFrame } from '@/design/tokens';
 import type { DayEntry } from '@/core/types';
 import { formatDate, formatDateShort, shortTitle } from '@/core/strings';
 import { hashString } from '@/core/color';
 
-type Item = Pick<DayEntry, 'id' | 'date' | 'mood' | 'tokens'>;
+type Item = DayEntry;
 
-/** Видимый диаметр сферы ≈ 0.56 стороны квадрата, который рисует шейдер (остальное — ореол). */
-const BODY = 0.56;
+/** Видимый диаметр тела сферы — доля стороны её кадра (остальное — ореол, кольца, тень). */
+const BODY = orbFrame.radius * 2;
 const PAD = 16;
 
 /** Крупнейший диаметр, при котором все сферы с подписями помещаются в поле; иначе — минимальный и прокрутка. */
@@ -78,12 +80,21 @@ export default function OrbField({ days, matches }: { days: Item[]; matches: (d:
   const labelW = Math.min(g.cw - 8, g.small ? 160 : 210);
   const focus = selected ?? hover;
 
-  const orbs: OrbDraw[] = layout.map(({ d, cx, cy }) => ({
-    id: d.id, tokens: d.tokens, contrast: d.mood.contrast,
-    x: cx, y: cy + top - scroll,
-    size: (g.d / BODY) * (matches(d) ? 1 : 0.55) * (d.mood.arousal * 0.08 + 0.94),
-    hover: focus === d.id ? 1 : 0,
+  const params = useMemo(() => new Map(days.map((d) => [d.id, orbParams(orbSource(d))])), [days]);
+  // сохранённые миниатюры текущей версии рендера; остальные рисуются один раз статично
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const m: Record<string, string> = {};
+    for (const d of days) if (d.thumb && d.thumbV === ORB_RENDER_VERSION) m[d.id] = URL.createObjectURL(d.thumb);
+    setThumbs(m);
+    return () => Object.values(m).forEach((u) => URL.revokeObjectURL(u));
+  }, [days]);
+
+  const orbs = layout.map(({ d, cx, cy }) => ({
+    id: d.id, x: cx, y: cy + top - scroll,
+    scale: (matches(d) ? 1 : 0.55) * (d.mood.arousal * 0.08 + 0.94),
   }));
+  const frame = g.d / BODY;
 
   function open(d: Item, pointerType: string) {
     if (drag.current?.moved) return;
@@ -109,7 +120,14 @@ export default function OrbField({ days, matches }: { days: Item[]; matches: (d:
       onPointerLeave={() => { drag.current = null; }}
       onClick={(e) => { if (e.target === e.currentTarget) setSelected(null); }}
     >
-      <OrbCanvas orbs={orbs} className="pointer-events-none absolute inset-0" />
+      {orbs.map((o) => (
+        <Orb
+          key={o.id} params={params.get(o.id)!} size={Math.round(frame)} thumbUrl={thumbs[o.id]}
+          live={focus === o.id} hover={focus === o.id}
+          className="pointer-events-none absolute"
+          style={{ left: o.x - frame * orbFrame.cx, top: o.y - frame * orbFrame.cy, transform: `scale(${o.scale})`, transformOrigin: `${orbFrame.cx * 100}% ${orbFrame.cy * 100}%`, transition: 'transform .6s var(--ease)' }}
+        />
+      ))}
       {layout.map(({ d }, i) => {
         const o = orbs[i];
         const on = matches(d);

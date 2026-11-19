@@ -60,7 +60,8 @@ export type DayEntry = {
     file?: Blob; fileName?: string; // + файл песни хранится в папке дня
   };
   mood: MoodProfile; tokens: StyleTokens; explain: string[]; voice?: Blob; createdAt: number;
-  thumb?: Blob;                        // + превью сферы для thumb.jpg
+  thumb?: Blob;                        // + миниатюра сферы (PNG) для архива и thumb.png папки
+  thumbV?: number;                     // + версия рендера миниатюры: устаревшие перерисовываются
   analysisEngine?: 'llm' | 'fallback'; // + честная пометка «упрощённый анализ»
   photoFeatures?: PhotoFeatures;       // + для «Почему» и A/B
   seed?: boolean;                      // + день из seed-дневника
