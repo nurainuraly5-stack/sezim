@@ -1,103 +1,103 @@
-import Image from "next/image";
+'use client';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'motion/react';
+import Logo from '@/components/Logo';
+import OrbField from '@/components/OrbField';
+import DayStrip from '@/components/DayStrip';
+import { listDays } from '@/lib/db';
+import { seedIfEmpty } from '@/lib/seed';
+import { S, formatDate } from '@/core/strings';
+import type { DayEntry } from '@/core/types';
 
-export default function Home() {
+type View = 'orbs' | 'strip';
+
+export default function ArchivePage() {
+  const [days, setDays] = useState<DayEntry[] | null>(null);
+  const [seeding, setSeeding] = useState<[number, number] | null>(null);
+  const [q, setQ] = useState('');
+  const [view, setView] = useState<View>('orbs');
+
+  useEffect(() => {
+    try { const v = localStorage.getItem('sezim:view'); if (v === 'strip' || v === 'orbs') setView(v); } catch {}
+    (async () => {
+      try {
+        await seedIfEmpty((i, n) => setSeeding(i < n ? [i, n] : null));
+      } catch (e) {
+        console.warn('seed failed', e);
+      }
+      setSeeding(null);
+      setDays(await listDays());
+    })();
+  }, []);
+
+  const pick = (v: View) => { setView(v); try { localStorage.setItem('sezim:view', v); } catch {} };
+
+  const matches = useCallback((d: Pick<DayEntry, 'date' | 'mood'>) => {
+    const s = q.trim().toLowerCase().replace(/ё/g, 'е');
+    if (!s) return true;
+    const hay = [d.mood.title, d.date, formatDate(d.date), d.date.split('-').reverse().join('.')].join(' ').toLowerCase().replace(/ё/g, 'е');
+    return hay.includes(s);
+  }, [q]);
+
+  const found = useMemo(() => (days ?? []).filter(matches).length, [days, matches]);
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <main className="relative flex h-[100dvh] flex-col">
+      <header className="relative z-10 flex flex-wrap items-center justify-between gap-3 px-4 pt-5 md:px-10 md:pt-7">
+        <Logo />
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-full border border-line p-0.5" role="tablist" aria-label="Вид архива">
+            {(['orbs', 'strip'] as View[]).map((v) => (
+              <button key={v} role="tab" aria-selected={view === v} onClick={() => pick(v)}
+                className="rounded-full px-3.5 py-1.5 text-xs transition-colors duration-500"
+                style={{ background: view === v ? 'var(--ink)' : 'transparent', color: view === v ? '#12100c' : 'var(--mute)' }}>
+                {v === 'orbs' ? S.viewOrbs : S.viewStrip}
+              </button>
+            ))}
+          </div>
+          <Link href="/new" className="btn btn-light">{S.newDay}</Link>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+      </header>
+
+      <div className="relative z-10 mx-auto mt-6 w-full max-w-md px-4">
+        <input
+          className="field text-center text-sm" placeholder={S.search} value={q}
+          onChange={(e) => setQ(e.target.value)} aria-label={S.search} type="search"
+        />
+        <p className="mt-2 h-4 text-center text-[0.7rem] text-faint" aria-live="polite">
+          {q && days ? (found ? `${found} из ${days.length}` : S.nothingFound) : ''}
+        </p>
+      </div>
+
+      <section className="relative min-h-0 flex-1">
+        {seeding && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
+            <motion.span
+              className="h-24 w-24 rounded-full"
+              style={{ background: 'radial-gradient(circle at 40% 35%, #fff2d6, #e9c58f 40%, #3b4a6b 100%)', boxShadow: '0 0 60px 10px rgba(233,197,143,0.25)' }}
+              animate={{ scale: [0.9, 1.05, 0.9], opacity: [0.7, 1, 0.7] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <p className="label">{S.seeding} {seeding[0] + 1}/{seeding[1]}</p>
+          </div>
+        )}
+        {days && days.length === 0 && !seeding && (
+          <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
+            <p className="font-display text-2xl text-mute">{S.emptyArchive}</p>
+            <Link href="/new" className="btn btn-light">{S.newDay}</Link>
+          </div>
+        )}
+        {days && days.length > 0 && (
+          view === 'orbs'
+            ? <OrbField days={days} matches={matches} />
+            : <DayStrip days={days} matches={matches} />
+        )}
+      </section>
+
+      <footer className="pointer-events-none relative z-10 px-4 pb-4 text-center text-[0.68rem] tracking-[0.2em] text-faint md:pb-6">
+        DAYS YOU CAN FEEL AGAIN
       </footer>
-    </div>
+    </main>
   );
 }
