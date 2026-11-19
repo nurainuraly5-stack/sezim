@@ -11,29 +11,27 @@ const TECH_INDEX: Record<TechniqueId, number> = { softStrokes: 0, geometric: 1, 
 type Rect = { cx: number; cy: number; w: number; h: number; rot: number };
 
 /** Композиция — переменная часть. Способ встраивания (окно в тёмное пространство) — постоянный. */
+/** Композиция кадров внутри карточки сцены — переменная часть: у каждой техники своя раскладка.
+ *  Постоянное — способ встраивания: фото в «окне» тёмного пространства карточки. */
 export function compose(tech: TechniqueId, W: number, H: number, n: number): Rect[] {
-  const mobile = W < 768;
-  const top = mobile ? 0.12 : 0.1, bottom = mobile ? 0.6 : 0.74; // зона кадра по высоте
+  const top = 0.07, bottom = 0.93;
   const cy = H * (top + bottom) / 2, zh = H * (bottom - top);
   switch (tech) {
-    case 'ma':
-      return [{ cx: W * (mobile ? 0.6 : 0.66), cy: cy - zh * 0.04, w: Math.min(W * (mobile ? 0.5 : 0.24), zh * 0.62), h: zh * (mobile ? 0.5 : 0.56), rot: 0 }];
-    case 'filmNight': {
-      const w = W * (mobile ? 0.94 : 0.74);
+    case 'ma': // «ма»: один небольшой кадр со смещением, много пустоты
+      return [{ cx: W * 0.62, cy: cy - zh * 0.03, w: Math.min(W * 0.38, zh * 0.66), h: zh * 0.62, rot: 0 }];
+    case 'filmNight': { // широкий «киноэкран»
+      const w = W * 0.9;
       return [{ cx: W * 0.5, cy, w, h: Math.min(zh * 0.92, w / 1.85), rot: 0 }];
     }
-    case 'geometric':
-      return [{ cx: W * (mobile ? 0.5 : 0.6), cy, w: W * (mobile ? 0.86 : 0.48), h: zh * 0.9, rot: 0 }];
-    case 'collage': {
+    case 'geometric': // жёсткий кадр, сдвинутый с центра
+      return [{ cx: W * 0.58, cy, w: W * 0.62, h: zh * 0.92, rot: 0 }];
+    case 'collage': { // несколько кадров внахлёст с поворотом
       const k = Math.min(4, Math.max(1, n));
-      const slots: [number, number, number][] = mobile
-        ? [[0.32, 0.3, -0.06], [0.68, 0.36, 0.05], [0.36, 0.7, 0.04], [0.7, 0.72, -0.05]]
-        : [[0.3, 0.36, -0.05], [0.52, 0.3, 0.04], [0.72, 0.42, -0.03], [0.44, 0.72, 0.06]];
-      const w = mobile ? W * 0.48 : W * 0.25, h = mobile ? zh * 0.46 : zh * 0.52;
-      return slots.slice(0, k).map(([x, y, r]) => ({ cx: W * x, cy: H * top + zh * y, w, h, rot: r }));
+      const slots: [number, number, number][] = [[0.28, 0.28, -0.05], [0.66, 0.26, 0.04], [0.32, 0.72, 0.04], [0.7, 0.7, -0.05]];
+      return slots.slice(0, k).map(([x, y, r]) => ({ cx: W * x, cy: H * top + zh * y, w: W * 0.42, h: zh * 0.46, rot: r }));
     }
-    default:
-      return [{ cx: W * (mobile ? 0.5 : 0.56), cy, w: W * (mobile ? 0.96 : 0.64), h: zh * 0.98, rot: 0 }];
+    default: // мягкие мазки: большой кадр с растворённым краем
+      return [{ cx: W * 0.5, cy, w: W * 0.9, h: zh * 0.96, rot: 0 }];
   }
 }
 

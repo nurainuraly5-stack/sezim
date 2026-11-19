@@ -51,10 +51,12 @@ let running: Promise<void> | null = null;
 
 /** Автозагрузка при пустой базе. onProgress(i, n) — для анимации «собираем архив». */
 export function seedIfEmpty(onProgress?: (i: number, n: number) => void | Promise<void>): Promise<void> {
+  // onProgress(0, n) — сразу, как только ясно, что архив будет собираться (интерфейс показывает прогресс)
   if (running) return running;
   running = (async () => {
     if ((await db.days.count()) > 0) return;
     if (readFlag()) return; // пользователь удалил seed — не возвращаем
+    await onProgress?.(0, SEED.length);
     for (let i = 0; i < SEED.length; i++) {
       const s = SEED[i];
       const raw = await Promise.all(s.photos.map((p) => fetch(p).then((r) => r.blob())));

@@ -1,6 +1,7 @@
 // Проверка дизайн-токенов: `npm run check:tokens`.
 // Контраст WCAG 2.1 AA для всех пар «текст / фон», минимальные кегли и веса, трекинг заголовков.
-import { color, contrastMin, type, typeMobile } from '../design/tokens';
+import { color, contrastMin, dayTheme, type, typeMobile } from '../design/tokens';
+import { hslToHex } from '../core/color';
 
 let fails = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? '✓' : '✗'} ${msg}`); if (!cond) fails++; };
@@ -37,6 +38,16 @@ for (const theme of ['light', 'dark'] as const) {
   const r = ratio(t.onAccent, t.accent);
   ok(r >= contrastMin.text, `${theme}: onAccent на accent — ${r.toFixed(2)}`);
 }
+
+console.log('\nТема страницы дня: 2000 случайных палитр');
+let worst = Infinity;
+for (let i = 0; i < 2000; i++) {
+  const pal = Array.from({ length: 5 }, (_, k) => hslToHex([(i * 37 + k * 71) % 360, ((i * 13 + k * 29) % 100) / 100, ((i * 17 + k * 23) % 100) / 100]));
+  const th = dayTheme(pal, (i % 10) / 10, i % 7 === 0 ? 'night' : 'day');
+  const t = th.dark ? color.dark : color.light;
+  for (const ground of [th.bg, over(t.surface, th.bg)]) worst = Math.min(worst, ratio(t.inkSoft, ground), ratio(t.accent, ground));
+}
+ok(worst >= contrastMin.text, `худший контраст текста на фоне дня — ${worst.toFixed(2)}`);
 
 console.log('\nГраницы цвета текста');
 ok(lum(color.light.inkSoft) <= lum('#3A3550') + 1e-9 && lum(color.light.ink) <= lum('#3A3550'), 'на светлом текст не светлее #3A3550');

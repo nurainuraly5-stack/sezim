@@ -1,5 +1,6 @@
 // Дизайн-токены Sezim — единственный источник размеров, весов, цветов, радиусов и сетки.
 // Компоненты не задают свои кегли/веса/радиусы: только отсюда (через CSS-переменные или импорт).
+import { hexToHsl, hslToHex } from '@/core/color';
 
 /** Один шрифт везде: Manrope (variable, кириллица), fallback — системный. */
 export const font = {
@@ -111,7 +112,7 @@ export const orbFrame = {
 
 /** Размеры сфер (видимый диаметр тела, px). */
 export const orbSize = {
-  archive: { desktop: 150, mobile: 104 },
+  archive: { desktop: 132, mobile: 100 },
   hero: { desktop: 360, mobile: 240 },
   preview: { desktop: 300, mobile: 220 },
   thumb: 384, // сторона кэш-миниатюры (px)
@@ -137,4 +138,26 @@ export function cssVariables(): Record<string, string> {
   v['--shadow-card'] = shadow.card;
   v['--ease'] = motion.ease;
   return v;
+}
+
+/**
+ * Тема страницы дня — из токенов дня: оттенок фона берётся из палитры дня,
+ * тёмные/ночные дни получают тёмную тему. Светлота фона зажата (≥ 0.93 светлая, ≤ 0.11 тёмная),
+ * поэтому текст токенов всегда проходит WCAG AA (проверка — npm run check:tokens).
+ */
+export function dayTheme(palette: string[], depth: number, daypart: string) {
+  const dark = depth >= 0.5 || daypart === 'night';
+  const pick = palette[Math.min(2, palette.length - 1)];
+  const [h, s] = hexToHsl(pick);
+  const sat = Math.min(s, 0.32);
+  const [h2, s2] = hexToHsl(palette[Math.min(3, palette.length - 1)]);
+  // у серых палитр оттенок всё равно читается: минимальная насыщенность фона 0.18
+  const bg = dark ? hslToHex([h, Math.max(sat * 0.8, 0.14), 0.085]) : hslToHex([h, Math.max(sat * 0.7, 0.18), 0.955]);
+  const glowA = dark ? hslToHex([h2, Math.min(s2, 0.4), 0.2]) : hslToHex([h2, Math.min(s2, 0.55), 0.89]);
+  const glowB = dark ? hslToHex([h, sat, 0.14]) : hslToHex([h, sat, 0.92]);
+  return {
+    dark,
+    bg,
+    background: `radial-gradient(90% 70% at 85% 0%, ${glowA} 0%, transparent 60%), radial-gradient(80% 60% at 0% 100%, ${glowB} 0%, transparent 60%), ${bg}`,
+  };
 }

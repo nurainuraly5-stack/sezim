@@ -1,25 +1,30 @@
 'use client';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { motion } from 'motion/react';
-import Logo from '@/components/Logo';
-import OrbField from '@/components/OrbField';
-import DayStrip from '@/components/DayStrip';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import AppShell from '@/components/AppShell';
+import DayPanel from '@/components/DayPanel';
+import OrbGrid from '@/components/OrbGrid';
+import { useOrbThumbs } from '@/components/useOrbThumbs';
+import { useMedia } from '@/components/useMedia';
 import { listDays } from '@/lib/db';
 import { seedIfEmpty } from '@/lib/seed';
-import { S, formatDate } from '@/core/strings';
+import { S, formatDate, formatMonth } from '@/core/strings';
 import type { DayEntry } from '@/core/types';
 
-type View = 'orbs' | 'strip';
+const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
 
 export default function ArchivePage() {
+  const router = useRouter();
   const [days, setDays] = useState<DayEntry[] | null>(null);
   const [seeding, setSeeding] = useState<[number, number] | null>(null);
   const [q, setQ] = useState('');
-  const [view, setView] = useState<View>('orbs');
+  const [month, setMonth] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string>();
+  const mobile = useMedia('(max-width: 767px)');
+  const withPanel = useMedia('(min-width: 1280px)', true);
 
   useEffect(() => {
-    try { const v = localStorage.getItem('sezim:view'); if (v === 'strip' || v === 'orbs') setView(v); } catch {}
     (async () => {
       try {
         await seedIfEmpty(async (i, n) => {
@@ -34,76 +39,86 @@ export default function ArchivePage() {
     })();
   }, []);
 
-  const pick = (v: View) => { setView(v); try { localStorage.setItem('sezim:view', v); } catch {} };
+  const all = useMemo(() => days ?? [], [days]);
+  const months = useMemo(() => Array.from(new Set(all.map((d) => d.date.slice(0, 7)))), [all]);
+  const shown = useMemo(() => {
+    const s = norm(q.trim());
+    return all.filter((d) => {
+      if (month && !d.date.startsWith(month)) return false;
+      if (!s) return true;
+      return norm([d.mood.title, d.date, formatDate(d.date), d.date.split('-').reverse().join('.')].join(' ')).includes(s);
+    });
+  }, [all, q, month]);
+  const thumbs = useOrbThumbs(all);
+  const current = shown.find((d) => d.id === selected) ?? shown[0];
 
-  const matches = useCallback((d: Pick<DayEntry, 'date' | 'mood'>) => {
-    const s = q.trim().toLowerCase().replace(/ё/g, 'е');
-    if (!s) return true;
-    const hay = [d.mood.title, d.date, formatDate(d.date), d.date.split('-').reverse().join('.')].join(' ').toLowerCase().replace(/ё/g, 'е');
-    return hay.includes(s);
-  }, [q]);
-
-  const found = useMemo(() => (days ?? []).filter(matches).length, [days, matches]);
+  function pick(d: DayEntry) {
+    if (withPanel) setSelected(d.id);
+    else router.push(`/day/${d.id}`);
+  }
 
   return (
-    <main className="relative flex h-[100dvh] flex-col">
-      <header className="relative z-10 flex flex-wrap items-center justify-between gap-3 px-4 pt-5 md:px-10 md:pt-7">
-        <Logo />
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-full border border-line p-0.5" role="tablist" aria-label="Вид архива">
-            {(['orbs', 'strip'] as View[]).map((v) => (
-              <button key={v} role="tab" aria-selected={view === v} onClick={() => pick(v)}
-                className="rounded-full px-3.5 py-1.5 text-xs transition-colors duration-500"
-                style={{ background: view === v ? 'var(--ink)' : 'transparent', color: view === v ? '#12100c' : 'var(--mute)' }}>
-                {v === 'orbs' ? S.viewOrbs : S.viewStrip}
-              </button>
-            ))}
-          </div>
-          <Link href="/new" className="btn btn-light">{S.newDay}</Link>
-        </div>
-      </header>
+    <AppShell>
+      <div className="mx-auto grid max-w-[1600px] gap-8 px-4 pb-16 pt-6 md:px-6 lg:px-10 lg:pt-10 xl:grid-cols-[minmax(0,1fr)_var(--panel-w)]">
+        <main className="min-w-0">
+          <section className="flex flex-col gap-5">
+            <h1 className="t-display">{S.heroTitle}</h1>
+            <p className="t-body soft measure">{S.heroSub}</p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Link href="/new" className="btn btn-primary">{S.createMemory}</Link>
+              <label className="relative block w-full sm:max-w-sm">
+                <span className="sr-only">{S.search}</span>
+                <svg className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="11" cy="11" r="6.5" stroke="var(--ink-soft)" strokeWidth="2" /><path d="m16 16 4 4" stroke="var(--ink-soft)" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <input type="search" className="field pl-10" placeholder={S.search} value={q} onChange={(e) => setQ(e.target.value)} />
+              </label>
+            </div>
+          </section>
 
-      <div className="relative z-10 mx-auto mt-6 w-full max-w-md px-4">
-        <input
-          className="field text-center text-sm" placeholder={S.search} value={q}
-          onChange={(e) => setQ(e.target.value)} aria-label={S.search} type="search"
-        />
-        <p className="mt-2 h-4 text-center text-[0.7rem] text-faint" aria-live="polite">
-          {q && days ? (found ? `${found} из ${days.length}` : S.nothingFound) : ''}
-        </p>
+          <section className="mt-10" aria-labelledby="mem-h">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="mem-h" className="t-h2">{S.yourMemories}</h2>
+              {days && <p className="t-caption" aria-live="polite">{S.shown(shown.length, all.length)}</p>}
+            </div>
+            {months.length > 1 && (
+              <div className="no-scrollbar -mx-1 mt-4 flex gap-2 overflow-x-auto px-1" role="group" aria-label="Фильтр по дате">
+                <button className="chip shrink-0" aria-pressed={!month} onClick={() => setMonth(null)}>{S.allDates}</button>
+                {months.map((m) => (
+                  <button key={m} className="chip shrink-0" aria-pressed={month === m} onClick={() => setMonth(month === m ? null : m)}>{formatMonth(m)}</button>
+                ))}
+              </div>
+            )}
+            {seeding && <p className="t-caption mt-4" aria-live="polite">{S.seeding(seeding[0], seeding[1])}</p>}
+
+            <div className="mt-6">
+              {days && all.length === 0 && !seeding && (
+                <div className="card flex flex-col items-start gap-4 p-6">
+                  <p className="t-body measure">{S.emptyArchive}</p>
+                  <Link href="/new" className="btn btn-primary">{S.createMemory}</Link>
+                </div>
+              )}
+              {all.length > 0 && shown.length === 0 && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="t-body">{S.nothingFound}</p>
+                  <button className="btn" onClick={() => { setQ(''); setMonth(null); }}>{S.resetFilter}</button>
+                </div>
+              )}
+              {shown.length > 0 && (
+                <OrbGrid days={shown} selected={withPanel ? current?.id : undefined} thumbs={thumbs} mobile={mobile} onPick={pick} />
+              )}
+            </div>
+          </section>
+        </main>
+
+        {withPanel && (
+          <aside className="hidden xl:block" aria-label="Открытый день">
+            <div className="sticky top-10">
+              {current ? <DayPanel day={current} /> : days && <p className="t-body soft">{S.pickDay}</p>}
+            </div>
+          </aside>
+        )}
       </div>
-
-      <section className="relative min-h-0 flex-1">
-        {seeding && !days?.length && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
-            <motion.span
-              className="h-24 w-24 rounded-full"
-              style={{ background: 'radial-gradient(circle at 40% 35%, #fff2d6, #e9c58f 40%, #3b4a6b 100%)', boxShadow: '0 0 60px 10px rgba(233,197,143,0.25)' }}
-              animate={{ scale: [0.9, 1.05, 0.9], opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-            />
-            <p className="label">{S.seeding}</p>
-          </div>
-        )}
-        {seeding && !!days?.length && (
-          <p className="label pointer-events-none absolute inset-x-0 bottom-2 z-10 text-center">{S.seeding} {seeding[0]}/{seeding[1]}</p>
-        )}
-        {days && days.length === 0 && !seeding && (
-          <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
-            <p className="font-display text-2xl text-mute">{S.emptyArchive}</p>
-            <Link href="/new" className="btn btn-light">{S.newDay}</Link>
-          </div>
-        )}
-        {days && days.length > 0 && (
-          view === 'orbs'
-            ? <OrbField days={days} matches={matches} />
-            : <DayStrip days={days} matches={matches} />
-        )}
-      </section>
-
-      <footer className="pointer-events-none relative z-10 px-4 pb-4 text-center text-[0.68rem] tracking-[0.2em] text-faint md:pb-6">
-        DAYS YOU CAN FEEL AGAIN
-      </footer>
-    </main>
+    </AppShell>
   );
 }

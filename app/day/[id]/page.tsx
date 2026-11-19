@@ -1,108 +1,112 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AnimatePresence, motion } from 'motion/react';
-import Logo from '@/components/Logo';
+import AppShell from '@/components/AppShell';
+import AtmosphereChart from '@/components/AtmosphereChart';
 import MemoryScene from '@/components/MemoryScene';
 import Orb from '@/components/Orb';
-import { orbParams, orbSource } from '@/core/orb';
+import SongPlayer from '@/components/SongPlayer';
 import WhyPanel from '@/components/WhyPanel';
+import { useMedia, useWidth } from '@/components/useMedia';
 import { deleteDay, getDay, putDay } from '@/lib/db';
-import { DayPlayer, type VoiceMode } from '@/lib/player';
+import { DayPlayer, loadBrowserVoices, pickRuVoice } from '@/lib/player';
 import { isTtsConfigured, renderVoice, voiceScript } from '@/lib/pipeline';
 import { download, exportDayZip, folderName } from '@/lib/zip';
-import { parseSongLink } from '@/core/analyze/song-link';
-import { S, formatDate, DAYPART_RU } from '@/core/strings';
+import { orbParams, orbSource } from '@/core/orb';
+import { S, DAYPART_RU, formatDate, formatWeekday, modeRu, moodSummary } from '@/core/strings';
 import type { DayEntry } from '@/core/types';
+import { dayTheme, orbFrame, orbSize } from '@/design/tokens';
 
 export default function DayPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
   const [day, setDay] = useState<DayEntry | null | undefined>(undefined);
-  const [entered, setEntered] = useState(false);
-  const [why, setWhy] = useState(false);
-  const [embed, setEmbed] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [glFailed, setGlFailed] = useState(false);
-  const [fallbackUrl, setFallbackUrl] = useState('');
-  const [voiceMode, setVoiceMode] = useState<VoiceMode>('none');
-  const [speaking, setSpeaking] = useState(false);
-  const [voiceRendering, setVoiceRendering] = useState(false);
-  const player = useRef<DayPlayer | null>(null);
+  useEffect(() => { getDay(id).then((d) => setDay(d ?? null)); }, [id]);
 
-  useEffect(() => {
-    getDay(id).then((d) => { setDay(d ?? null); if (d) setTitle(d.mood.title); });
-    return () => player.current?.stop();
-  }, [id]);
-
-  useEffect(() => {
-    if (!glFailed || !day?.photos[0]) return;
-    const u = URL.createObjectURL(day.photos[0]);
-    setFallbackUrl(u);
-    return () => URL.revokeObjectURL(u);
-  }, [glFailed, day]);
-
-  if (day === undefined) return <main className="h-[100dvh] bg-bg" />;
+  if (day === undefined) return <AppShell><div className="min-h-[60vh]" /></AppShell>;
   if (day === null) {
     return (
-      <main className="flex h-[100dvh] flex-col items-center justify-center gap-5">
-        <p className="font-display text-2xl text-mute">{S.notFound}</p>
-        <Link href="/" className="btn">{S.archive}</Link>
-      </main>
+      <AppShell>
+        <main className="flex min-h-[60vh] flex-col items-start justify-center gap-5 px-4 md:px-10">
+          <p className="t-h2">{S.notFound}</p>
+          <Link href="/" className="btn">{S.backToArchive}</Link>
+        </main>
+      </AppShell>
     );
   }
+  return <DayView key={day.id} day={day} onChange={setDay} />;
+}
 
-  const d = day;
-  const link = d.song.kind === 'link' && d.song.url ? parseSongLink(d.song.url) : null;
-  const songLabel = [d.song.meta?.title, d.song.meta?.artist].filter(Boolean).join(' — ') || (d.song.kind === 'file' ? d.song.fileName : d.song.url);
-  const src = d.song.analysis?.source;
+function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) => void }) {
+  const router = useRouter();
+  const mobile = useMedia('(max-width: 767px)');
+  const params = useMemo(() => orbParams(orbSource(d)), [d]);
+  const theme = dayTheme(d.tokens.palette, params.depth, d.mood.daypart);
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(d.mood.title);
+  const [busy, setBusy] = useState(false);
+  const [glFailed, setGlFailed] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [voiceOk, setVoiceOk] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceRendering, setVoiceRendering] = useState(false);
+  const [songPause, setSongPause] = useState(0);
+  const player = useRef<DayPlayer | null>(null);
+  const [orbColRef, orbCol] = useWidth(600);
 
-  async function enter() {
+  // «Слушать день» показываем, только если голос реально есть: сохранённый, серверный TTS или русский голос браузера
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      const ok = !!d.voice || (await isTtsConfigured()) || !!pickRuVoice(await loadBrowserVoices());
+      if (!off) setVoiceOk(ok);
+    })();
+    return () => { off = true; };
+  }, [d.voice]);
+  useEffect(() => () => player.current?.stop(), []);
+
+  useEffect(() => {
+    if (!glFailed || !d.photos[0]) return;
+    const u = URL.createObjectURL(d.photos[0]);
+    setPhotoUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [glFailed, d.photos]);
+
+  function stopListening() {
+    player.current?.stop();
+    player.current = null;
+    setListening(false);
+  }
+
+  /** Песня дня + озвучка (музыка приглушается под голос). Только по нажатию. */
+  async function listen() {
+    if (listening) { stopListening(); return; }
+    setSongPause((k) => k + 1);
     const p = new DayPlayer(d);
     player.current = p;
-    p.onVoiceState = setSpeaking;
+    setListening(true);
     await p.start();
-    setVoiceMode(p.voiceMode);
-    setEntered(true);
-    if (link?.embed) setEmbed(true);
-    // Голоса ещё нет (день создан без ключа TTS) — синтезируем сейчас и сохраняем в папку дня.
-    const synth = d.voice ? null : synthesizeVoice(p);
-    setTimeout(async () => {
-      // ждём синтез не дольше 6 с, иначе — голос браузера, а синтезированный сохранится на следующий раз
-      if (synth) await Promise.race([synth, new Promise((r) => setTimeout(r, 6000))]);
-      p.playVoice();
-    }, 2200);
-  }
-
-  async function synthesizeVoice(p: DayPlayer) {
-    if (!(await isTtsConfigured())) return;
-    setVoiceRendering(true);
-    const blob = await renderVoice(voiceScript(d.mood.title, d.mood.quote), d.mood.voiceStyle.pace, d.mood.voiceStyle.warmth);
-    setVoiceRendering(false);
-    if (!blob) return;
-    const next = { ...d, voice: blob };
-    await putDay(next);
-    setDay(next);
-    await p.prepareVoice(blob);
-    setVoiceMode(p.voiceMode);
-  }
-
-  function toggleVoice() {
-    if (speaking) player.current?.stopVoice();
-    else player.current?.playVoice();
+    // голоса ещё нет, а TTS настроен — синтезируем и сохраняем в папку дня (ждём не дольше 6 с, иначе голос браузера)
+    if (!d.voice && (await isTtsConfigured())) {
+      setVoiceRendering(true);
+      const blob = await Promise.race([
+        renderVoice(voiceScript(d.mood.title, d.mood.quote), d.mood.voiceStyle.pace, d.mood.voiceStyle.warmth),
+        new Promise<undefined>((r) => setTimeout(() => r(undefined), 6000)),
+      ]);
+      setVoiceRendering(false);
+      if (blob) { await p.prepareVoice(blob); await putDay({ ...d, voice: blob }); }
+    }
+    if (player.current === p) p.playVoice();
   }
 
   async function saveTitle() {
     const t = title.trim().replace(/\s+/g, ' ');
     setEditing(false);
     if (!t || t === d.mood.title) { setTitle(d.mood.title); return; }
-    // сохранённый голос читает старое название — сбрасываем, при следующем входе синтезируется заново
+    // сохранённый голос читал старое название — сбрасываем, при следующем прослушивании синтезируется заново
     const next = { ...d, mood: { ...d.mood, title: t }, voice: undefined };
     await putDay(next);
-    setDay(next);
+    onChange(next);
   }
 
   async function doExport() {
@@ -112,134 +116,104 @@ export default function DayPage() {
 
   async function doDelete() {
     if (!window.confirm(S.confirmDelete)) return;
-    player.current?.stop();
+    stopListening();
     await deleteDay(d.id);
     router.push('/');
   }
 
-  const ease = d.tokens.motion.easing.match(/[\d.]+/g)?.map(Number) as [number, number, number, number] | undefined;
+  const a = d.song.analysis;
+  const music = a
+    ? `${Math.round(a.bpm)} BPM${modeRu(a.mode) ? `, ${modeRu(a.mode)}` : ''}${a.source === 'meta' ? ' (оценка)' : ''}`
+    : `${d.mood.tempo} BPM (по тексту)`;
+  // кадр сферы не шире колонки: кольца занимают ~0.95 ширины кадра
+  const heroFrame = Math.min(Math.round((mobile ? orbSize.hero.mobile : orbSize.hero.desktop) / (orbFrame.radius * 2)), Math.floor(orbCol / 0.95));
+  const daypart = DAYPART_RU[d.mood.daypart];
 
   return (
-    <main className="relative h-[100dvh] overflow-hidden bg-bg">
-      {glFailed ? (
-        // без WebGL: честный простой вид — фото в палитре дня, без шейдерной обработки
-        <div className="absolute inset-0" style={{ background: `radial-gradient(80% 70% at 55% 40%, ${d.tokens.palette[1]}55, #07070b 75%)` }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {fallbackUrl && <img src={fallbackUrl} alt="" className="absolute left-1/2 top-[42%] max-h-[62%] max-w-[70%] -translate-x-1/2 -translate-y-1/2 rounded-[14px] object-cover opacity-80" />}
-        </div>
-      ) : (
-        <MemoryScene photos={d.photos} tokens={d.tokens} id={d.id} intensity={entered ? 1 : 0.35} onFail={() => setGlFailed(true)} />
-      )}
+    <AppShell className={theme.dark ? 'theme-dark' : ''} style={{ background: theme.background, color: 'var(--ink)' }}>
+      <main className="mx-auto max-w-[1280px] px-4 pb-16 pt-5 md:px-6 lg:px-10 lg:pt-8">
+        <Link href="/" className="btn btn-quiet -ml-3">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden><path d="m14.5 6-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          {S.backToArchive}
+        </Link>
 
-      {/* Постоянная рамка: шапка, дата, сфера */}
-      <header className="absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 px-4 pt-5 md:px-10 md:pt-7">
-        <div className="flex items-center gap-4">
-          <Logo />
-          <span className="hidden text-[0.68rem] uppercase tracking-[0.22em] text-mute sm:inline">
-            {formatDate(d.date)}{DAYPART_RU[d.mood.daypart] ? ` · ${DAYPART_RU[d.mood.daypart]}` : ''}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="btn" onClick={() => setWhy((w) => !w)} aria-expanded={why}>{S.why}</button>
-          <Link href="/" className="btn">{S.back}</Link>
-        </div>
-      </header>
+        <header className="mt-5 flex flex-col items-start gap-4">
+          <p className="chip">{formatDate(d.date).replace(/\s*г\.?$/, '')}, {formatWeekday(d.date)}{daypart ? `, ${daypart}` : ''}</p>
+          {editing ? (
+            <form onSubmit={(e) => { e.preventDefault(); saveTitle(); }} className="flex w-full max-w-3xl flex-wrap items-center gap-3">
+              <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} maxLength={70} aria-label="Название дня" className="field t-h2 flex-1" />
+              <button className="btn btn-primary" type="submit">{S.save}</button>
+            </form>
+          ) : (
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              <h1 className="t-display max-w-4xl">{d.mood.title}</h1>
+              <button className="btn btn-quiet" onClick={() => setEditing(true)}>{S.rename}</button>
+            </div>
+          )}
+          <p className="t-body soft measure">«{d.mood.quote}»</p>
+          <ul className="flex flex-wrap gap-2" aria-label="Коротко о дне">
+            <li className="chip">{moodSummary(d.mood)}</li>
+            <li className="chip">♪ {music}</li>
+            <li className="chip">{S.photosCount(d.photos.length)}</li>
+          </ul>
+        </header>
 
-      <div className="pointer-events-none absolute right-3 top-16 z-10 h-28 w-28 md:right-8 md:top-20 md:h-36 md:w-36" aria-hidden>
-        <Orb params={orbParams(orbSource(d))} size={144} live className="h-full w-full" style={{ width: '100%', height: '100%' }} />
-      </div>
-
-      {/* Название и подпись от руки */}
-      <section className="absolute inset-x-0 bottom-0 z-10 px-4 pb-40 md:px-10 md:pb-24">
-        <p className="mb-2 text-[0.68rem] uppercase tracking-[0.22em] text-mute sm:hidden">{formatDate(d.date)}</p>
-        <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-          <div className="max-w-3xl">
-            {editing ? (
-              <form onSubmit={(e) => { e.preventDefault(); saveTitle(); }} className="flex items-end gap-3">
-                <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} maxLength={70}
-                  className="field font-display text-[2rem] md:text-[3.2rem]" aria-label="Название дня" />
-              </form>
+        <section className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <div className="card relative aspect-[4/3] overflow-hidden" style={{ background: '#0b0a12' }}>
+            {glFailed ? (
+              // без WebGL — фото как есть, честно без обработки
+              // eslint-disable-next-line @next/next/no-img-element
+              photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
             ) : (
-              <motion.h1
-                initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 1.4 / d.tokens.motion.speed, ease: ease ?? 'easeOut' }}
-                className="font-display text-[2.3rem] leading-[1.02] text-ink md:text-[4rem]"
-                style={{ fontWeight: d.tokens.typeWeight, textShadow: '0 2px 30px rgba(0,0,0,0.55)' }}
-              >
-                {d.mood.title}
-                <button onClick={() => setEditing(true)} className="ml-3 align-middle text-xs text-faint underline-offset-4 hover:text-ink hover:underline" style={{ fontFamily: 'var(--font-sans)', fontWeight: 400 }}>
-                  {S.rename}
-                </button>
-              </motion.h1>
+              <MemoryScene photos={d.photos} tokens={d.tokens} id={d.id} intensity={1} onFail={() => setGlFailed(true)} />
             )}
           </div>
-          <AnimatePresence>
-            {entered && (
-              <motion.p
-                initial={{ opacity: 0, clipPath: 'inset(0 100% 0 0)' }} animate={{ opacity: 1, clipPath: 'inset(0 0% 0 0)' }}
-                transition={{ duration: 3.2, delay: 1.2, ease: 'easeInOut' }}
-                className="hand line-clamp-3 max-w-md text-[1.4rem] leading-snug md:text-right md:text-[2.1rem]"
-                style={{ color: d.tokens.orb.core, textShadow: '0 1px 18px rgba(0,0,0,0.6)' }}
-              >
-                «{d.mood.quote}»
-              </motion.p>
+          <div ref={orbColRef} className="flex min-w-0 flex-col items-center gap-4">
+            <div className="relative w-full" style={{ height: heroFrame * 0.86, maxWidth: heroFrame }}>
+              <Orb params={params} size={heroFrame} live className="absolute left-1/2" style={{ top: -heroFrame * 0.05, marginLeft: -heroFrame / 2 }} />
+            </div>
+            {voiceOk && (
+              <button className="btn btn-primary w-full max-w-sm" onClick={listen} aria-pressed={listening}>
+                {voiceRendering ? S.voiceRendering : listening ? S.stopListening : S.listenDay}
+              </button>
             )}
-          </AnimatePresence>
-        </div>
-      </section>
+            <div className="w-full max-w-sm">
+              <SongPlayer day={d} pauseKey={songPause} onPlay={stopListening} />
+            </div>
+          </div>
+        </section>
 
-      {/* Нижняя панель */}
-      <footer className="absolute inset-x-0 bottom-0 z-20 flex flex-wrap items-center gap-2 px-4 pb-5 md:px-10">
-        <span className="chip max-w-[60vw] truncate" title={songLabel}>♪ {songLabel}{src === 'meta' ? ' · оценка по метаданным' : src === 'manual' ? ' · вручную' : ''}</span>
-        {link && (link.embed
-          ? <button className="chip" onClick={() => setEmbed((e) => !e)}>{embed ? 'Скрыть плеер' : S.openSong}</button>
-          : <a className="chip" href={d.song.url} target="_blank" rel="noreferrer">{S.openSong} ↗</a>)}
-        {entered && (voiceRendering ? (
-          <span className="chip" aria-live="polite">◐ {S.voiceRendering}</span>
-        ) : voiceMode === 'none' ? (
-          <span className="chip text-faint">{S.voiceNone}</span>
-        ) : (
-          <button className="chip" data-on={speaking} onClick={toggleVoice} aria-pressed={speaking}>
-            {speaking ? `■ ${S.voiceStop}` : `◐ ${S.voice}: ${voiceMode === 'saved' ? S.voiceSaved : S.voiceLive}`}
-          </button>
-        ))}
-        <span className="flex-1" />
-        <button className="chip" onClick={doExport} disabled={busy}>{busy ? 'Собираем…' : S.exportZip}</button>
-        <button className="chip" onClick={doDelete}>{S.delete}</button>
-      </footer>
+        <section className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          <article className="card p-5">
+            <h2 className="t-h3">{S.aboutDay}</h2>
+            <p className="t-body mt-3 whitespace-pre-line">{d.text}</p>
+            {d.mood.motifs.length > 0 && (
+              <ul className="mt-4 flex flex-wrap gap-2" aria-label={S.momentsOfDay}>
+                {d.mood.motifs.map((m) => <li key={m} className="chip">{m}</li>)}
+              </ul>
+            )}
+          </article>
+          <article className="card p-5">
+            <h2 className="t-h3">{S.atmosphere}</h2>
+            <div className="mt-4"><AtmosphereChart mood={d.mood} /></div>
+          </article>
+          <article className="card p-5 md:col-span-2 xl:col-span-1">
+            <h2 className="t-h3">{S.whyTitle}</h2>
+            <div className="mt-4"><WhyPanel explain={d.explain} tokens={d.tokens} engine={d.analysisEngine} audio={d.song.analysis} /></div>
+          </article>
+        </section>
 
-      {/* Вход в день — звук только по клику */}
-      <AnimatePresence>
-        {!entered && (
-          <motion.div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center" exit={{ opacity: 0 }} transition={{ duration: 1 }}>
-            <button onClick={enter} className="btn btn-light pointer-events-auto px-7 py-3.5 text-base">
-              {S.enter} <span className="text-xs opacity-70">· {S.enterHint}</span>
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Встроенный плеер ссылки */}
-      {embed && link?.embed && (
-        <div className="absolute left-4 top-20 z-30 w-[min(92vw,340px)] overflow-hidden rounded-[14px] border border-line bg-bg md:left-10 md:top-24">
-          <iframe src={link.embed} title="Песня дня" allow="autoplay; encrypted-media" className="block w-full"
-            style={{ height: link.provider === 'spotify' ? 152 : link.provider === 'soundcloud' ? 120 : 200, border: 0 }} />
-        </div>
-      )}
-
-      {/* Почему так выглядит */}
-      <AnimatePresence>
-        {why && (
-          <motion.aside
-            initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute inset-y-0 right-0 z-40 w-full max-w-sm overflow-y-auto border-l border-line bg-[#09090e]/95 p-6 backdrop-blur-sm"
-          >
-            <button className="btn mb-6" onClick={() => setWhy(false)}>Закрыть</button>
-            <WhyPanel explain={d.explain} tokens={d.tokens} mood={d.mood} engine={d.analysisEngine} audio={d.song.analysis} />
-            <p className="mt-6 text-[0.72rem] leading-relaxed text-faint">{d.text}</p>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-    </main>
+        <footer className="card mt-6 flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1">
+            <p className="t-caption">{S.folder}</p>
+            <p className="t-title break-all">{folderName(d)}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn" onClick={doExport} disabled={busy}>{busy ? 'Собираем…' : S.exportZip}</button>
+            <button className="btn btn-quiet" onClick={doDelete}>{S.delete}</button>
+          </div>
+        </footer>
+      </main>
+    </AppShell>
   );
 }
