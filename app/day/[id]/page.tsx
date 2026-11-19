@@ -8,7 +8,8 @@ import MemoryScene from '@/components/MemoryScene';
 import OrbCanvas from '@/components/OrbCanvas';
 import WhyPanel from '@/components/WhyPanel';
 import { deleteDay, getDay, putDay } from '@/lib/db';
-import { DayPlayer } from '@/lib/player';
+import { DayPlayer, type VoiceMode } from '@/lib/player';
+import { isTtsConfigured, renderVoice, voiceScript } from '@/lib/pipeline';
 import { download, exportDayZip, folderName } from '@/lib/zip';
 import { parseSongLink } from '@/core/analyze/song-link';
 import { S, formatDate, DAYPART_RU } from '@/core/strings';
@@ -26,6 +27,9 @@ export default function DayPage() {
   const [busy, setBusy] = useState(false);
   const [glFailed, setGlFailed] = useState(false);
   const [fallbackUrl, setFallbackUrl] = useState('');
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>('none');
+  const [speaking, setSpeaking] = useState(false);
+  const [voiceRendering, setVoiceRendering] = useState(false);
   const player = useRef<DayPlayer | null>(null);
 
   useEffect(() => {
@@ -58,17 +62,44 @@ export default function DayPage() {
   async function enter() {
     const p = new DayPlayer(d);
     player.current = p;
+    p.onVoiceState = setSpeaking;
     await p.start();
+    setVoiceMode(p.voiceMode);
     setEntered(true);
     if (link?.embed) setEmbed(true);
-    setTimeout(() => p.playVoice(), 2200);
+    // Голоса ещё нет (день создан без ключа TTS) — синтезируем сейчас и сохраняем в папку дня.
+    const synth = d.voice ? null : synthesizeVoice(p);
+    setTimeout(async () => {
+      // ждём синтез не дольше 6 с, иначе — голос браузера, а синтезированный сохранится на следующий раз
+      if (synth) await Promise.race([synth, new Promise((r) => setTimeout(r, 6000))]);
+      p.playVoice();
+    }, 2200);
+  }
+
+  async function synthesizeVoice(p: DayPlayer) {
+    if (!(await isTtsConfigured())) return;
+    setVoiceRendering(true);
+    const blob = await renderVoice(voiceScript(d.mood.title, d.mood.quote), d.mood.voiceStyle.pace, d.mood.voiceStyle.warmth);
+    setVoiceRendering(false);
+    if (!blob) return;
+    const next = { ...d, voice: blob };
+    await putDay(next);
+    setDay(next);
+    await p.prepareVoice(blob);
+    setVoiceMode(p.voiceMode);
+  }
+
+  function toggleVoice() {
+    if (speaking) player.current?.stopVoice();
+    else player.current?.playVoice();
   }
 
   async function saveTitle() {
     const t = title.trim().replace(/\s+/g, ' ');
     setEditing(false);
     if (!t || t === d.mood.title) { setTitle(d.mood.title); return; }
-    const next = { ...d, mood: { ...d.mood, title: t } };
+    // сохранённый голос читает старое название — сбрасываем, при следующем входе синтезируется заново
+    const next = { ...d, mood: { ...d.mood, title: t }, voice: undefined };
     await putDay(next);
     setDay(next);
   }
@@ -162,11 +193,15 @@ export default function DayPage() {
         {link && (link.embed
           ? <button className="chip" onClick={() => setEmbed((e) => !e)}>{embed ? 'Скрыть плеер' : S.openSong}</button>
           : <a className="chip" href={d.song.url} target="_blank" rel="noreferrer">{S.openSong} ↗</a>)}
-        {entered && player.current?.voiceMode !== 'none' && (
-          <button className="chip" onClick={() => player.current?.playVoice()}>
-            ◐ {S.voice}: {player.current?.voiceMode === 'saved' ? S.voiceSaved : S.voiceLive}
+        {entered && (voiceRendering ? (
+          <span className="chip" aria-live="polite">◐ {S.voiceRendering}</span>
+        ) : voiceMode === 'none' ? (
+          <span className="chip text-faint">{S.voiceNone}</span>
+        ) : (
+          <button className="chip" data-on={speaking} onClick={toggleVoice} aria-pressed={speaking}>
+            {speaking ? `■ ${S.voiceStop}` : `◐ ${S.voice}: ${voiceMode === 'saved' ? S.voiceSaved : S.voiceLive}`}
           </button>
-        )}
+        ))}
         <span className="flex-1" />
         <button className="chip" onClick={doExport} disabled={busy}>{busy ? 'Собираем…' : S.exportZip}</button>
         <button className="chip" onClick={doDelete}>{S.delete}</button>

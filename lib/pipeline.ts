@@ -78,6 +78,16 @@ export async function renderVoice(script: string, pace: 'slow' | 'mid' | 'fast',
   }
 }
 
+/** Настроен ли TTS на сервере (кэш на сессию вкладки). */
+let ttsConfigured: Promise<boolean> | null = null;
+export function isTtsConfigured(): Promise<boolean> {
+  ttsConfigured ??= fetch('/api/tts', { signal: AbortSignal.timeout(4000) })
+    .then((r) => (r.ok ? r.json() : { configured: false }))
+    .then((j: { configured?: boolean }) => !!j.configured)
+    .catch(() => false);
+  return ttsConfigured;
+}
+
 export const voiceScript = (title: string, quote: string) => `${title}. ${quote}`;
 
 export async function createDay(input: DraftInputs, opts: { titleOverride?: string; seed?: boolean; id?: string; createdAt?: number } = {}): Promise<DayEntry> {
@@ -91,7 +101,7 @@ export async function createDay(input: DraftInputs, opts: { titleOverride?: stri
 
   const mood = buildMood(text, input.photoFeatures, input.audio);
   const { tokens, explain } = buildStyle({ mood, text, photo: input.photoFeatures, audio: input.audio, meta });
-  const voice = opts.seed ? undefined : await renderVoice(voiceScript(mood.title, mood.quote), mood.voiceStyle.pace, mood.voiceStyle.warmth);
+  const voice = opts.seed || !(await isTtsConfigured()) ? undefined : await renderVoice(voiceScript(mood.title, mood.quote), mood.voiceStyle.pace, mood.voiceStyle.warmth);
   const thumb = await renderOrbSnapshot(tokens, mood.contrast, 256).catch(() => undefined);
 
   const day: DayEntry = {
