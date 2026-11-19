@@ -18,11 +18,21 @@ export function loadBrowserVoices(timeout = 1500): Promise<SpeechSynthesisVoice[
   });
 }
 
-/** Лучший русский голос: локальный и «естественный» предпочтительнее. */
+/** Лучший русский голос: нейросетевые (Edge «Natural»), затем Google / macOS Milena·Yuri, затем системные SAPI.
+ *  При равенстве — локальный (без сетевой задержки и обрывов). */
 export function pickRuVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined {
   const ru = voices.filter((v) => v.lang.toLowerCase().replace('_', '-').startsWith('ru'));
-  const score = (v: SpeechSynthesisVoice) => (/natural|neural|online|google|milena|yandex/i.test(v.name) ? 2 : 0) + (v.localService ? 1 : 0);
-  return ru.sort((a, b) => score(b) - score(a))[0];
+  const score = (v: SpeechSynthesisVoice) =>
+    (/natural|neural/i.test(v.name) ? 4 : /google|milena|yuri|yandex/i.test(v.name) ? 3 : 1) + (v.localService ? 0.5 : 0);
+  return [...ru].sort((a, b) => score(b) - score(a))[0];
+}
+
+/** Тёплая спокойная подача голоса браузера: всегда чуть медленнее обычной речи; темп дня меняет её мягко,
+ *  тепло дня слегка понижает тон (pitch 1 → 0.9). */
+export function browserProsody(style: DayEntry['mood']['voiceStyle']) {
+  const rate = style.pace === 'slow' ? 0.78 : style.pace === 'fast' ? 0.92 : 0.85;
+  const pitch = 1 - Math.min(1, Math.max(0, style.warmth)) * 0.1;
+  return { rate, pitch };
 }
 
 export class DayPlayer {
@@ -111,8 +121,9 @@ export class DayPlayer {
     const u = new SpeechSynthesisUtterance(voiceScript(mood.title, mood.quote));
     u.lang = this.ruVoice?.lang || 'ru-RU';
     if (this.ruVoice) u.voice = this.ruVoice;
-    u.rate = mood.voiceStyle.pace === 'slow' ? 0.82 : mood.voiceStyle.pace === 'fast' ? 1.02 : 0.92;
-    u.pitch = 0.9 + mood.voiceStyle.warmth * 0.2;
+    const { rate, pitch } = browserProsody(mood.voiceStyle);
+    u.rate = rate;
+    u.pitch = pitch;
     const done = () => { if (this.utter === u) { this.utter = undefined; this.ended(); } };
     u.onend = done;
     u.onerror = done;

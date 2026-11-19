@@ -36,11 +36,11 @@ export async function POST(req: Request) {
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: process.env.TTS_MODEL || 'gpt-4o-mini-tts',
-          voice: warmth > 0.55 ? 'coral' : 'sage',
+          voice: 'sage', // мягкий спокойный тембр; тепло задаём инструкцией
           input: text,
           response_format: 'mp3',
-          speed: pace === 'slow' ? 0.88 : pace === 'fast' ? 1.08 : 1,
-          instructions: `Russian text. Read as a quiet personal memory, ${pace === 'slow' ? 'slowly, with pauses' : pace === 'fast' ? 'lively but soft' : 'at an even pace'}, ${warmth > 0.55 ? 'warm and close' : 'cool, airy and calm'}. No theatrics.`,
+          speed: pace === 'slow' ? 0.86 : pace === 'fast' ? 0.96 : 0.92,
+          instructions: `Russian text. Voice: warm, calm and soft, close to the listener, like quietly recalling a memory to a friend. ${pace === 'slow' ? 'Unhurried, with gentle pauses.' : pace === 'fast' ? 'A little livelier, but still soft and calm.' : 'Even, relaxed pace.'} ${warmth > 0.55 ? 'Extra warmth, a hint of a smile.' : 'Hushed and airy, still warm.'} No theatrics, no announcer tone.`,
         }),
       });
       if (!r.ok) return new Response('tts failed', { status: 502 });
@@ -52,7 +52,8 @@ export async function POST(req: Request) {
         headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY!, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text, model_id: process.env.TTS_MODEL || 'eleven_multilingual_v2',
-          voice_settings: { stability: pace === 'fast' ? 0.35 : 0.6, similarity_boost: 0.7, style: warmth * 0.4, speed: pace === 'slow' ? 0.9 : pace === 'fast' ? 1.07 : 1 },
+          // высокая стабильность — ровная спокойная подача; style умеренный — без театральности
+          voice_settings: { stability: pace === 'fast' ? 0.6 : 0.72, similarity_boost: 0.75, style: 0.1 + warmth * 0.15, speed: pace === 'slow' ? 0.88 : pace === 'fast' ? 0.97 : 0.93 },
         }),
       });
       if (!r.ok) return new Response('tts failed', { status: 502 });

@@ -88,7 +88,12 @@ export function isTtsConfigured(): Promise<boolean> {
   return ttsConfigured;
 }
 
-export const voiceScript = (title: string, quote: string) => `${title}. ${quote}`;
+/** Текст озвучки: название и цитата; если цитата начинается с названия — без повтора. */
+export function voiceScript(title: string, quote: string) {
+  const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N} ]/gu, '').trim();
+  const q = quote.trim().replace(/[.…!?]*$/, '.');
+  return norm(quote).startsWith(norm(title)) ? q : `${title.replace(/[.…]+$/, '')}. ${q}`;
+}
 
 export async function createDay(input: DraftInputs, opts: { titleOverride?: string; seed?: boolean; id?: string; createdAt?: number } = {}): Promise<DayEntry> {
   const fallback = analyzeTextFallback(input.text);
