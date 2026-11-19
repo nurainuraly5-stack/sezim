@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:tokens": "node --import ./scripts/ts-hooks.mjs scripts/check-tokens.ts",
+    "test:orbs": "node --import ./scripts/ts-hooks.mjs scripts/orb-uniqueness.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.10.0",

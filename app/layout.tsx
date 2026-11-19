@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Caveat, Cormorant_Garamond, Manrope } from 'next/font/google';
 import './globals.css';
+import { cssVariables } from '@/design/tokens';
 
 const display = Cormorant_Garamond({ subsets: ['latin', 'cyrillic'], weight: ['300', '400', '500', '600', '700'], variable: '--font-display', display: 'swap' });
 const sans = Manrope({ subsets: ['latin', 'cyrillic'], variable: '--font-sans', display: 'swap' });
@@ -16,7 +17,7 @@ export const viewport: Viewport = { themeColor: '#07070b', width: 'device-width'
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="ru">
+    <html lang="ru" style={cssVariables() as React.CSSProperties}>
       <body className={`${display.variable} ${sans.variable} ${hand.variable} antialiased`}>
         <div className="grain" aria-hidden />
         {children}
