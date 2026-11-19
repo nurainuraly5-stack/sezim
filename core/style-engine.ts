@@ -28,11 +28,11 @@ export function scoreTechniques({ mood, text, photo, audio }: EngineInput) {
   const dark = photo ? 1 - photo.brightness : mood.daypart === 'night' ? 0.7 : 0.4;
   const nightish = mood.daypart === 'night' ? 1 : mood.daypart === 'dusk' ? 0.6 : 0;
   const fast = mood.tempo > 120 ? 1 : 0;
-  const few = text.wordCount < 45 ? 1 : 0;
+  const few = text.wordCount < 16 ? 1 : text.wordCount < 28 ? 0.4 : 0;
   const many = (photo?.count ?? 0) >= 4 ? 1 : 0;
   const s: Record<TechniqueId, { score: number; why: string[] }> = {
     softStrokes: {
-      score: (1 - mood.arousal) * 0.5 + mood.valence * 0.45 + mood.warmth * 0.3 + (mood.daypart === 'day' || mood.daypart === 'dawn' ? 0.15 : 0),
+      score: (1 - mood.arousal) * 0.4 + mood.valence * 0.5 + mood.warmth * 0.4 + (mood.daypart !== 'night' ? 0.1 : 0),
       why: [`спокойный день (возбуждение ${pct(mood.arousal)})`, `светлое настроение (${pct(mood.valence)})`, mood.warmth > 0.55 ? `тёплая температура (${pct(mood.warmth)})` : ''],
     },
     geometric: {
@@ -44,8 +44,8 @@ export function scoreTechniques({ mood, text, photo, audio }: EngineInput) {
       why: [nightish ? (mood.daypart === 'night' ? 'в тексте ночь' : 'в тексте вечер') : '', photo ? `тёмные фото (яркость ${pct(photo.brightness)})` : '', mood.mode === 'minor' ? 'минорный лад' : ''],
     },
     ma: {
-      score: (1 - mood.density) * 0.6 + few * 0.3 + (1 - mood.arousal) * 0.25 - (photo && photo.count > 2 ? 0.2 : 0),
-      why: [few ? `мало слов (${text.wordCount})` : '', `разреженный день (плотность ${pct(mood.density)})`, mood.arousal < 0.4 ? 'тихий темп жизни' : ''],
+      score: (1 - mood.density) * 0.45 + few * 0.45 + (1 - mood.arousal) * 0.2 - (photo && photo.count > 2 ? 0.2 : 0),
+      why: [few >= 0.4 ? `мало слов (${text.wordCount})` : '', `разреженный день (плотность ${pct(mood.density)})`, mood.arousal < 0.4 ? 'тихий темп жизни' : ''],
     },
     collage: {
       score: many * 0.55 + mood.density * 0.45 + Math.min((photo?.count ?? 0) / 8, 0.3),

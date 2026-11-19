@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sezim — Days you can feel again
 
-## Getting Started
+*Дни, которые можно почувствовать снова.*
 
-First, run the development server:
+Sezim собирает день из текста, фото и песни в **Memory Orb** — светящуюся сферу воспоминания.
+Архив — пространство сфер. Открыть сферу → полноэкранная сцена дня: фото с обработкой в технике,
+которую выбрал день, музыка, подпись от руки и озвучка.
+
+## Запуск (3 команды)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # ключи необязательны — без них работает fallback
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Без ключей всё работает: текст анализируется локальным движком («упрощённый анализ»),
+озвучка — голосом браузера. С ключами: `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`,
+`TTS_PROVIDER=openai|elevenlabs` + ключ.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Как это устроено
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+ввод ─┬─ текст ──► /api/analyze (LLM, zod, 8 с) ─┐  падение → fallback (русские маркеры)
+      ├─ фото ───► k-means палитра, яркость, контраст, температура
+      └─ песня ──► файл: FFT → BPM, энергия, centroid, лад (хрома)
+                   ссылка: embed + oEmbed → ОЦЕНКА по метаданным (подписана честно)
+                         │
+                         ▼
+                  MoodProfile (непрерывный вектор)
+                         │   core/mood.ts
+                         ▼
+                  Style Engine (чистые детерминированные функции)
+                         │   core/style-engine.ts
+                         ▼
+             StyleTokens + explain[]  ──► WebGL (свой GLSL) + Web Audio ──► IndexedDB (Dexie)
+```
 
-## Learn More
+- **Цвет сферы не из словаря «эмоция = цвет»**: палитра — из фото, музыка сдвигает её
+  (лад → тёплая/холодная доля, энергия → насыщенность), без фото — непрерывная ось температуры текста.
+- **Смешанные состояния** видны внутри одной сферы: оболочка — «внешняя» температура (фото, холодные
+  детали), ядро — «внутренняя» (тёплые детали). Чем выше противоречие, тем отчётливее граница.
+- **5 техник** (Soft Strokes, Geometric Tension, Film Grain Night, Ma, Collage) — один шейдер,
+  техника = набор uniform-параметров. Условия включения явные, причины — в панели «Почему».
+- **Музыка**: темп → дыхание сферы и ритм смены кадров, энергия → зерно и резкость,
+  лад → температура палитры, год/жанр → фактура.
 
-To learn more about Next.js, take a look at the following resources:
+| Папка | Что |
+|---|---|
+| `core/types.ts` | контракт: MoodProfile, StyleTokens, DayEntry |
+| `core/analyze/` | анализ текста (fallback), фото, аудио, ссылок |
+| `core/mood.ts`, `core/style-engine.ts` | признаки → настроение → стиль + объяснение |
+| `core/gl/` | GLSL: сфера и сцена |
+| `components/` | OrbField, DayStrip, MemoryScene, WhyPanel |
+| `lib/` | конвейер, IndexedDB, экспорт ZIP, плеер, seed |
+| `app/api/` | `/api/analyze`, `/api/tts` |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Папка дня
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+«Экспорт папки .zip» собирает реальную структуру:
+`entry.json`, `photos/`, `song.json` (+ аудио), `memory.json` (токены + explain), `voice.mp3`, `thumb.jpg`.
 
-## Deploy on Vercel
+## Seed-дневник
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+При пустой базе загружаются 6 вымышленных дней одного автора (5 настроений).
+Фото — процедурные SVG-заглушки (`public/seed/`), музыка — процедурная (CC0), генерируется
+в браузере и проходит тот же реальный аудио-анализ, что и файлы пользователя.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Честность
+
+Голоса только синтезированные. Данные вымышленные. Если аудио недоступно (ссылка), темп и лад
+подписаны как «оценка по метаданным». Sezim не делает медицинских или психологических выводов.

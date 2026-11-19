@@ -66,7 +66,7 @@ function scoreSentence(s: string) {
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const clean = (s: string) => s.replace(/[«»"“”]/g, '').replace(/[\s,;:—–-]+$/g, '').replace(/[.!?…]+$/g, '').trim();
+const clean = (s: string) => s.replace(/^(но|и|а|да|зато|однако)\s+/i, '').replace(/[«»"“”]/g, '').replace(/[\s,;:—–-]+$/g, '').replace(/[.!?…]+$/g, '').trim();
 
 export function fallbackTitle(sentence: string, motif?: string): string {
   const words = clean(sentence).split(/\s+/).filter(Boolean);
@@ -120,7 +120,7 @@ export function analyzeTextFallback(text: string): TextFeatures {
   const ranked = [...sentences].sort((a, b) => scoreSentence(b) - scoreSentence(a));
   const bestSentence = ranked[0] || text || 'Тихий день';
   const qWords = clean(bestSentence).split(/\s+/);
-  const quote = qWords.length > 14 ? qWords.slice(0, 14).join(' ') + '…' : clean(bestSentence);
+  const quote = cap(qWords.length > 14 ? qWords.slice(0, 14).join(' ') + '…' : clean(bestSentence));
   const title = fallbackTitle(bestSentence, motifs[0]) || 'Тихий день';
 
   return {
