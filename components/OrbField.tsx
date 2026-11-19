@@ -1,21 +1,47 @@
 'use client';
-// Архив как пространство сфер: спираль по времени (новые — в центре), перетаскивание, наведение.
+// Архив как пространство сфер: свободная сетка (новые — первыми), каждой сфере — своя ячейка
+// с подписью под ней, поэтому ни сферы, ни подписи не пересекаются. Лишнее по высоте — прокрутка.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import OrbCanvas from './OrbCanvas';
 import type { OrbDraw } from './orb-renderer';
 import type { DayEntry } from '@/core/types';
-import { formatDate } from '@/core/strings';
+import { formatDate, formatDateShort, shortTitle } from '@/core/strings';
+import { hashString } from '@/core/color';
 
 type Item = Pick<DayEntry, 'id' | 'date' | 'mood' | 'tokens'>;
+
+/** Видимый диаметр сферы ≈ 0.56 стороны квадрата, который рисует шейдер (остальное — ореол). */
+const BODY = 0.56;
+const PAD = 16;
+
+/** Крупнейший диаметр, при котором все сферы с подписями помещаются в поле; иначе — минимальный и прокрутка. */
+function grid(n: number, w: number, h: number) {
+  const small = w < 640;
+  const [dMax, dMin] = small ? [132, 104] : [176, 132];
+  const label = small ? 46 : 50; // две строки: короткое название + дата
+  const availW = w - PAD * 2, availH = h - PAD * 2;
+  let pick = null as null | { d: number; cols: number; rows: number; cw: number; ch: number; x0: number };
+  for (let d = dMax; d >= dMin; d -= 4) {
+    const minCw = d * (small ? 1.32 : 1.45);
+    const rows = Math.ceil(n / Math.max(1, Math.min(n, Math.floor(availW / minCw))));
+    const cols = Math.ceil(n / rows); // ровные ряды: 6 → 3+3, а не 5+1
+    const ch = d + label + (small ? 18 : 30);
+    const cw = Math.min(availW / cols, d * 1.9);
+    pick = { d, cols, rows, cw, ch, x0: PAD + (availW - cw * cols) / 2 };
+    if (rows * ch <= availH) break;
+  }
+  return { ...pick!, label, small };
+}
 
 export default function OrbField({ days, matches }: { days: Item[]; matches: (d: Item) => boolean }) {
   const router = useRouter();
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [scroll, setScroll] = useState(0);
   const [hover, setHover] = useState<string | null>(null);
-  const drag = useRef<{ x: number; y: number; px: number; py: number; moved: boolean } | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const drag = useRef<{ y: number; s: number; moved: boolean } | null>(null);
 
   useEffect(() => {
     const el = box.current!;
@@ -24,72 +50,100 @@ export default function OrbField({ days, matches }: { days: Item[]; matches: (d:
     return () => ro.disconnect();
   }, []);
 
-  const layout = useMemo(() => {
-    const small = size.w < 640;
-    const base = small ? 118 : 168;
-    const gap = small ? 92 : 132;
-    const raw = days.map((d, i) => {
-      const a = i * 2.39996; // золотой угол
-      const rad = i === 0 ? 0 : gap * Math.sqrt(i + 0.6);
-      const s = base * (0.82 + d.mood.arousal * 0.18 + d.mood.valence * 0.12);
-      // портретный экран (телефон) — тянем спираль по вертикали
-      const tall = size.h / Math.max(1, size.w) > 1.2;
-      return { d, x: Math.cos(a) * rad * (tall ? 0.62 : 1), y: Math.sin(a) * rad * (tall ? 1.55 : 0.82), s };
-    });
-    // вписываем первые ~12 сфер в экран (дальние — перетаскиванием)
-    const near = raw.slice(0, 12);
-    const maxX = Math.max(1, ...near.map((o) => Math.abs(o.x) + o.s * 0.5));
-    const maxY = Math.max(1, ...near.map((o) => Math.abs(o.y) + o.s * 0.5 + 40));
-    const k = Math.min(1, (size.w / 2 - 12) / maxX, (size.h / 2 - 8) / maxY);
-    return raw.map((o) => ({ ...o, x: o.x * k, y: o.y * k, s: o.s * Math.max(0.75, k) }));
-  }, [days, size.w, size.h]);
+  const g = useMemo(() => grid(days.length, size.w, size.h), [days.length, size.w, size.h]);
+  const contentH = g.rows * g.ch + PAD * 2;
+  const maxScroll = Math.max(0, contentH - size.h);
+  const top = contentH <= size.h ? (size.h - contentH) / 2 : 0; // помещается — по центру по вертикали
+  const clamp = (v: number) => Math.min(maxScroll, Math.max(0, v));
+  useEffect(() => { setScroll((s) => Math.min(s, maxScroll)); }, [maxScroll]);
 
-  const orbs: OrbDraw[] = layout.map(({ d, x, y, s }) => ({
+  const layout = useMemo(() => days.map((d, i) => {
+    const row = Math.floor(i / g.cols), col = i % g.cols;
+    const inRow = Math.min(g.cols, days.length - row * g.cols);
+    const rowShift = ((g.cols - inRow) * g.cw) / 2; // неполный ряд — по центру
+    // лёгкий детерминированный сдвиг внутри ячейки — «живое» поле без пересечений
+    const h = parseInt(hashString(d.id), 36);
+    const free = Math.max(0, (g.cw - g.d * 1.2) / 2);
+    const jx = ((h % 1000) / 1000 - 0.5) * free;
+    const jy = ((Math.floor(h / 1000) % 1000) / 1000 - 0.5) * (g.small ? 10 : 18);
+    return { d, cx: g.x0 + rowShift + col * g.cw + g.cw / 2 + jx, cy: PAD + row * g.ch + g.d / 2 + 6 + jy };
+  }), [days, g]);
+
+  // есть что прокрутить — мягко гасим край поля (подсказка, что сфер больше)
+  const fadeTop = scroll > 2 ? 'transparent 0, #000 40px' : '#000 0';
+  const fadeBottom = scroll < maxScroll - 2 ? '#000 calc(100% - 56px), transparent 100%' : '#000 100%';
+  const mask = `linear-gradient(to bottom, ${fadeTop}, ${fadeBottom})`;
+  const fade = maxScroll ? { maskImage: mask, WebkitMaskImage: mask } : {};
+
+  const labelW = Math.min(g.cw - 8, g.small ? 160 : 210);
+  const focus = selected ?? hover;
+
+  const orbs: OrbDraw[] = layout.map(({ d, cx, cy }) => ({
     id: d.id, tokens: d.tokens, contrast: d.mood.contrast,
-    x: size.w / 2 + x + pan.x, y: size.h / 2 + y + pan.y,
-    size: s * (matches(d) ? 1 : 0.55), hover: hover === d.id ? 1 : 0,
+    x: cx, y: cy + top - scroll,
+    size: (g.d / BODY) * (matches(d) ? 1 : 0.55) * (d.mood.arousal * 0.08 + 0.94),
+    hover: focus === d.id ? 1 : 0,
   }));
+
+  function open(d: Item, pointerType: string) {
+    if (drag.current?.moved) return;
+    // касание: первое — выбрать (полное название), второе — открыть; мышь и клавиатура открывают сразу
+    if (pointerType === 'touch' && selected !== d.id) { setSelected(d.id); return; }
+    router.push(`/day/${d.id}`);
+  }
 
   return (
     <div
       ref={box}
       className="relative h-full w-full touch-none select-none overflow-hidden"
-      style={{ cursor: drag.current ? 'grabbing' : 'grab' }}
-      onPointerDown={(e) => { drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y, moved: false }; }}
+      style={{ cursor: maxScroll ? (drag.current ? 'grabbing' : 'grab') : 'default', ...fade }}
+      onWheel={(e) => setScroll((s) => clamp(s + e.deltaY))}
+      onPointerDown={(e) => { drag.current = { y: e.clientY, s: scroll, moved: false }; }}
       onPointerMove={(e) => {
-        const g = drag.current; if (!g) return;
-        const dx = e.clientX - g.x, dy = e.clientY - g.y;
-        if (Math.abs(dx) + Math.abs(dy) > 4) g.moved = true;
-        setPan({ x: g.px + dx, y: g.py + dy });
+        const dr = drag.current; if (!dr) return;
+        const dy = e.clientY - dr.y;
+        if (Math.abs(dy) > 6) dr.moved = true;
+        if (maxScroll) setScroll(clamp(dr.s - dy));
       }}
       onPointerUp={() => { setTimeout(() => { drag.current = null; }, 0); }}
       onPointerLeave={() => { drag.current = null; }}
+      onClick={(e) => { if (e.target === e.currentTarget) setSelected(null); }}
     >
-      <OrbCanvas orbs={orbs} className="absolute inset-0" />
-      {layout.map(({ d, s }, i) => {
+      <OrbCanvas orbs={orbs} className="pointer-events-none absolute inset-0" />
+      {layout.map(({ d }, i) => {
         const o = orbs[i];
         const on = matches(d);
+        const full = focus === d.id;
+        // ширина подписи; у края экрана сдвигаем её внутрь, чтобы полное название не обрезалось
+        const lw = full ? Math.max(labelW, Math.min(260, size.w - 24)) : labelW;
+        const edge = Math.max(0, 8 - (o.x - lw / 2)) - Math.max(0, o.x + lw / 2 - (size.w - 8));
         return (
           <button
             key={d.id}
             aria-label={`${d.mood.title}, ${formatDate(d.date)}`}
             className="orb-hit absolute rounded-full"
-            style={{
-              left: o.x - (s * 0.56) / 2, top: o.y - (s * 0.56) / 2, width: s * 0.56, height: s * 0.56,
-              opacity: on ? 1 : 0.35,
-            }}
-            onPointerEnter={() => setHover(d.id)}
+            style={{ left: o.x - g.d / 2, top: o.y - g.d / 2, width: g.d, height: g.d, opacity: on ? 1 : 0.35, zIndex: full ? 5 : 1 }}
+            onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHover(d.id); }}
             onPointerLeave={() => setHover(null)}
-            onFocus={() => setHover(d.id)}
-            onBlur={() => setHover(null)}
-            onClick={() => { if (!drag.current?.moved) router.push(`/day/${d.id}`); }}
+            onFocus={(e) => { if (e.currentTarget.matches(':focus-visible')) setSelected(d.id); }}
+            onBlur={() => setSelected((s) => (s === d.id ? null : s))}
+            onClick={(e) => open(d, (e.nativeEvent as PointerEvent).pointerType || 'mouse')}
           >
             <span
-              className="pointer-events-none absolute left-1/2 top-full mt-2 w-40 -translate-x-1/2 text-center transition-opacity duration-500 sm:mt-3 sm:w-56"
-              style={{ opacity: on ? (hover === d.id ? 1 : 0.78) : 0.3 }}
+              data-label
+              className="pointer-events-none absolute top-full mt-2 rounded-[10px] px-2 py-1 text-center transition-[opacity,background-color] duration-500"
+              style={{
+                width: lw, left: g.d / 2 - lw / 2 + edge,
+                opacity: on ? (full ? 1 : 0.82) : 0.3,
+                background: full ? 'rgba(9,9,14,0.86)' : 'transparent',
+              }}
             >
-              <span className="block font-display text-[0.92rem] leading-tight text-ink sm:text-[1.05rem]">{d.mood.title}</span>
-              <span className="mt-1 block text-[0.68rem] uppercase tracking-[0.18em] text-mute">{formatDate(d.date)}</span>
+              <span className={`block font-display leading-tight text-ink ${full ? 'text-[1rem] sm:text-[1.1rem]' : 'truncate text-[0.88rem] sm:text-[0.98rem]'}`}>
+                {full ? d.mood.title : shortTitle(d.mood.title, g.small ? 16 : 22)}
+              </span>
+              <span className="mt-0.5 block text-[0.62rem] uppercase tracking-[0.16em] text-mute">
+                {full ? formatDate(d.date) : formatDateShort(d.date)}
+              </span>
             </span>
           </button>
         );

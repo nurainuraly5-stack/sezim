@@ -69,3 +69,22 @@ export function formatDate(iso: string): string {
   const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 }
+
+/** Подпись под сферой: «18 нояб.», год — только если не текущий. */
+export function formatDateShort(iso: string): string {
+  const d = new Date(iso + 'T12:00:00');
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) });
+}
+
+/** Короткая форма названия для подписи сферы: целые слова до max символов, дальше «…». */
+export function shortTitle(title: string, max = 20): string {
+  if (title.length <= max) return title;
+  let out = '';
+  for (const w of title.split(/\s+/)) {
+    const next = out ? `${out} ${w}` : w;
+    if (next.length > max) break;
+    out = next;
+  }
+  return `${(out || title.slice(0, max)).replace(/[,.;:—-]+$/, '')}…`;
+}
