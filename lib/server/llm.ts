@@ -59,7 +59,9 @@ export async function analyzeWithLlm(text: string, timeoutMs = 8000): Promise<Ll
 
   const client = new Anthropic({ timeout: timeoutMs, maxRetries: 0 });
   try {
-    const res = await client.messages.parse({
+    // create + разбор вручную (а не messages.parse): parse бросает исключение на пустом/обрезанном тексте
+    // раньше, чем виден stop_reason, — отказ и обрезку тогда не отличить от сбоя
+    const res = await client.messages.create({
       model: process.env.LLM_MODEL || 'claude-opus-5-5',
       max_tokens: 2000,
       system: SYSTEM,
@@ -67,7 +69,11 @@ export async function analyzeWithLlm(text: string, timeoutMs = 8000): Promise<Ll
       messages: [{ role: 'user', content: `Diary entry:\n"""\n${text.slice(0, 6000)}\n"""` }],
     });
     if (res.stop_reason === 'refusal') return { ok: false, reason: 'refusal' };
-    const parsed = LlmTextChecked.safeParse(res.parsed_output);
+    if (res.stop_reason === 'max_tokens') return { ok: false, reason: 'truncated' };
+    const raw = res.content.find((b) => b.type === 'text')?.text ?? '';
+    let json: unknown;
+    try { json = JSON.parse(raw); } catch { return { ok: false, reason: 'invalid json' }; }
+    const parsed = LlmTextChecked.safeParse(json);
     if (!parsed.success) return { ok: false, reason: 'validation: ' + parsed.error.issues[0]?.message };
     return { ok: true, data: parsed.data, provider: 'anthropic' };
   } catch (e) {

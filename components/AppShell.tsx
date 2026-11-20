@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Logo from './Logo';
 import { S } from '@/core/strings';
+import { setLlmOff, useLlmOff } from '@/lib/flags';
 
 const NAV = [
   { href: '/', label: S.archive, icon: 'M4 7.5h16M4 12h16M4 16.5h10' },
@@ -29,6 +30,19 @@ function NavLink({ href, label, icon, compact }: { href: string; label: string; 
   );
 }
 
+/** Значок флага «LLM выключен» (lib/flags.ts) — виден на всех экранах, пока флаг включён. */
+function LlmOffBadge() {
+  const off = useLlmOff();
+  if (!off) return null;
+  return (
+    <div role="status" title={S.llmOffHint} className="chip fixed bottom-4 left-4 z-50 gap-2 pr-1.5" style={{ background: 'var(--surface-strong)', boxShadow: 'var(--shadow-card)' }}>
+      <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: 'var(--ink-soft, currentColor)' }} />
+      <span>{S.llmOff}</span>
+      <button type="button" className="btn btn-quiet min-h-[32px] px-2.5" onClick={() => setLlmOff(false)}>{S.llmOn}</button>
+    </div>
+  );
+}
+
 export default function AppShell({ children, className = '', style }: { children: React.ReactNode; className?: string; style?: React.CSSProperties }) {
   return (
     <div className={`min-h-[100dvh] lg:grid lg:grid-cols-[var(--sidebar-w)_1fr] ${className}`} style={style}>
@@ -46,6 +60,7 @@ export default function AppShell({ children, className = '', style }: { children
         </nav>
       </header>
       <div className="min-w-0">{children}</div>
+      <LlmOffBadge />
     </div>
   );
 }

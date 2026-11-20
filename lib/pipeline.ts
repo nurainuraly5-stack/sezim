@@ -8,6 +8,7 @@ import { cacheGet, cacheSet, newId, putDay } from './db';
 import { ORB_RENDER_VERSION, renderOrbBlob } from '@/components/orb-engine';
 import { orbParams } from '@/core/orb';
 import { orbSize } from '@/design/tokens';
+import { isLlmOff } from './flags';
 
 export type DraftInputs = {
   text: string;
@@ -31,15 +32,18 @@ type AnalyzeResponse = {
   songMeta: { title?: string; artist?: string } | null;
 };
 
-/** /api/analyze с кэшем по хэшу ввода и жёстким таймаутом; падение → fallback. */
+/** /api/analyze с кэшем по хэшу ввода и жёстким таймаутом; падение → fallback.
+ *  Флаг «LLM выключен» (lib/flags.ts): кэш не читается, сервер модель не вызывает. */
 export async function analyzeRemote(text: string, songUrl?: string): Promise<AnalyzeResponse | null> {
+  const llmOff = isLlmOff();
   const key = 'analyze:' + hashString(text + '|' + (songUrl || ''));
-  const cached = await cacheGet<AnalyzeResponse>(key);
+  const cached = llmOff ? undefined : await cacheGet<AnalyzeResponse>(key);
   if (cached) return cached;
+  if (llmOff && !songUrl) return null; // без LLM и без ссылки сервер не нужен
   try {
     const r = await fetch('/api/analyze', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, songUrl: songUrl || undefined }),
+      body: JSON.stringify({ text, songUrl: songUrl || undefined, llm: llmOff ? false : undefined }),
       signal: AbortSignal.timeout(10000),
     });
     if (!r.ok) return null;

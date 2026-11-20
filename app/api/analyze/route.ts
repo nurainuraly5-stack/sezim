@@ -6,7 +6,8 @@ import { analyzeWithLlm } from '@/lib/server/llm';
 
 export const runtime = 'nodejs';
 
-const Body = z.object({ text: z.string().max(8000).optional(), songUrl: z.string().url().max(500).optional() });
+// llm:false — флаг «LLM выключен» с клиента (демо работы без LLM): модель не вызывается
+const Body = z.object({ text: z.string().max(8000).optional(), songUrl: z.string().url().max(500).optional(), llm: z.boolean().optional() });
 
 type OEmbed = { title?: string; author_name?: string };
 
@@ -37,16 +38,16 @@ async function oembed(url: string): Promise<{ title?: string; artist?: string } 
 export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: 'bad request' }, { status: 400 });
-  const { text, songUrl } = parsed.data;
+  const { text, songUrl, llm: llmWanted } = parsed.data;
 
   const [llm, meta] = await Promise.all([
-    text && text.trim().length > 8 ? analyzeWithLlm(text) : Promise.resolve(null),
+    text && text.trim().length > 8 && llmWanted !== false ? analyzeWithLlm(text) : Promise.resolve(null),
     songUrl ? oembed(songUrl) : Promise.resolve(null),
   ]);
 
   return NextResponse.json({
     llm: llm?.ok ? llm.data : null,
-    llmReason: llm && !llm.ok ? llm.reason : undefined,
+    llmReason: llmWanted === false ? 'disabled by client' : llm && !llm.ok ? llm.reason : undefined,
     songMeta: meta,
   });
 }
