@@ -1,4 +1,6 @@
 // Все строки интерфейса в одном месте (язык по умолчанию — RU).
+import type { AudioFeatures } from './types';
+import { MODE_SURE } from './analyze/audio';
 export const S = {
   sloganEn: 'Days you can feel again.',
   archive: 'Архив',
@@ -96,6 +98,9 @@ export const S = {
   livePreview: 'Живое превью',
   whyTitle: 'Почему так выглядит',
   simplified: 'упрощённый анализ',
+  llmOff: 'LLM выключен',
+  llmOffHint: 'Текст разбирает упрощённый анализ без модели — так приложение работает без ключа и сети.',
+  llmOn: 'Включить',
   llm: 'анализ текста: LLM',
   // день
   exportZip: 'Экспорт папки .zip',
@@ -118,6 +123,17 @@ export function moodSummary(m: { valence: number; arousal: number; warmth: numbe
 }
 
 export const modeRu = (m: string) => (m === 'major' ? 'мажор' : m === 'minor' ? 'минор' : m === 'mixed' ? 'смешанный лад' : '');
+
+/** Лад из файла определён неуверенно (петли вроде Am–F–C–G одинаково звучат в A minor и C major). */
+export const modeApprox = (a?: AudioFeatures) =>
+  !!a && a.source === 'audio' && a.mode !== 'unknown' && (a.modeConfidence ?? 1) < MODE_SURE;
+/** «минор» или «≈ минор» — для чипов и подписей. */
+export const audioModeRu = (a?: AudioFeatures) => {
+  const m = a ? modeRu(a.mode) : '';
+  return m && modeApprox(a) ? `≈ ${m}` : m;
+};
+/** «A minor» или «A minor или C major» (если вторая тональность почти так же вероятна). */
+export const audioKeyRu = (a?: AudioFeatures) => (!a?.key ? '' : modeApprox(a) && a.keyAlt ? `${a.key} или ${a.keyAlt}` : a.key);
 
 export const DAYPART_RU: Record<string, string> = {
   dawn: 'утро', day: 'день', dusk: 'вечер', night: 'ночь', unknown: '',

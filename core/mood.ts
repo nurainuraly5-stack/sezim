@@ -15,7 +15,8 @@ export function buildMood(text: TextFeatures, photo?: PhotoFeatures, audio?: Aud
   const aw = audio ? (audio.source === 'meta' ? 0.4 : 1) : 0; // оценке по метаданным доверяем меньше
   const modeVal = audio?.mode === 'major' ? 0.75 : audio?.mode === 'minor' ? 0.28 : 0.5;
   const modeWarm = audio?.mode === 'major' ? 0.66 : audio?.mode === 'minor' ? 0.34 : 0.5;
-  const modeKnown = audio && audio.mode !== 'unknown' ? 1 : 0;
+  // неуверенный лад (поп-петли, где мажор и параллельный минор звучат одинаково) влияет слабее
+  const modeKnown = audio && audio.mode !== 'unknown' ? (audio.modeConfidence ?? 1) : 0;
 
   const valence = wavg(
     [text.valence, 0.6],
@@ -41,7 +42,7 @@ export function buildMood(text: TextFeatures, photo?: PhotoFeatures, audio?: Aud
   const contrast = clamp(Math.max(
     text.contrast,
     photo ? Math.abs(photo.warmth - text.warmth) * 1.2 : 0,
-    audio && modeKnown ? Math.abs(modeVal - text.valence) * 0.8 * aw : 0,
+    audio && modeKnown ? Math.abs(modeVal - text.valence) * 0.8 * aw * modeKnown : 0,
   ));
 
   let mode: MoodProfile['mode'] = audio?.mode ?? 'unknown';

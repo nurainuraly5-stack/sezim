@@ -16,7 +16,7 @@ import { DayPlayer, loadBrowserVoices, pickRuVoice } from '@/lib/player';
 import { isTtsConfigured, renderVoice, voiceScript } from '@/lib/pipeline';
 import { download, exportDayZip, folderName } from '@/lib/zip';
 import { orbParams, orbSource } from '@/core/orb';
-import { S, DAYPART_RU, formatDate, formatWeekday, modeRu, moodSummary } from '@/core/strings';
+import { S, DAYPART_RU, formatDate, formatWeekday, audioModeRu, moodSummary } from '@/core/strings';
 import type { DayEntry } from '@/core/types';
 import { dayTheme, orbFrame, orbSize } from '@/design/tokens';
 
@@ -150,7 +150,7 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
 
   const a = d.song.analysis;
   const music = a
-    ? `${Math.round(a.bpm)} BPM${modeRu(a.mode) ? `, ${modeRu(a.mode)}` : ''}${a.source === 'meta' ? ' (оценка)' : ''}`
+    ? `${Math.round(a.bpm)} BPM${audioModeRu(a) ? `, ${audioModeRu(a)}` : ''}${a.source === 'meta' ? ' (оценка)' : ''}`
     : `${d.mood.tempo} BPM (по тексту)`;
   // кадр сферы не шире колонки: кольца занимают ~0.95 ширины кадра
   const heroFrame = Math.min(Math.round((mobile ? orbSize.hero.mobile : orbSize.hero.desktop) / (orbFrame.radius * 2)), Math.floor(orbCol / 0.95));

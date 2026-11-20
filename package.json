@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "check:tokens": "node --import ./scripts/ts-hooks.mjs scripts/check-tokens.ts",
-    "test:orbs": "node --import ./scripts/ts-hooks.mjs scripts/orb-uniqueness.ts"
+    "test:orbs": "node --import ./scripts/ts-hooks.mjs scripts/orb-uniqueness.ts",
+    "test:audio": "node --import ./scripts/ts-hooks.mjs scripts/audio-analysis.ts",
+    "test:llm": "node --conditions=react-server --import ./scripts/ts-hooks.mjs scripts/llm-contract.ts",
+    "make:audio-fixtures": "node --import ./scripts/ts-hooks.mjs scripts/make-audio-fixtures.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.10.0",

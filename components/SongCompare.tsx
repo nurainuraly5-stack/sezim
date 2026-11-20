@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AudioFeatures, DayEntry, SongMeta, TextFeatures } from '@/core/types';
 import { computeVariant, musicDiff, type Variant } from '@/core/ab';
 import { TECHNIQUES } from '@/core/style-engine';
-import { S, formatDateShort, modeRu } from '@/core/strings';
+import { S, audioModeRu, formatDateShort } from '@/core/strings';
 import { analyzeAudioFile } from '@/core/analyze/audio';
 import { TEMPO_PRESETS, linkAudio, parseSongLink, type ManualSong } from '@/core/analyze/song-link';
 import { analyzeRemote, dayTextFeatures } from '@/lib/pipeline';
@@ -118,7 +118,7 @@ export default function SongCompare({ day, others, mobile, onClose }: {
             {candidates.map((o) => (
               <button key={o.id} className="chip shrink-0" aria-pressed={otherId === o.id} onClick={() => setOtherId(o.id)} title={songLabel(o)}>
                 <span className="max-w-[16ch] truncate">{o.song.meta?.title || songLabel(o)}</span>
-                <span className="tabular-nums opacity-70">{Math.round(o.song.analysis!.bpm)} · {modeRu(o.song.analysis!.mode) || '?'}</span>
+                <span className="tabular-nums opacity-70">{Math.round(o.song.analysis!.bpm)} · {audioModeRu(o.song.analysis) || '?'}</span>
                 <span className="sr-only">, {formatDateShort(o.date)}</span>
               </button>
             ))}
@@ -185,7 +185,7 @@ function Column({ title, label, v, frame, base }: { title: string; label: string
     [S.rowTechnique, (x) => TECHNIQUES[x.tokens.technique].name],
     [S.rowRhythm, (x) => S.every(fmtSec(x.tokens.rhythm))],
     [S.rowBreath, (x) => S.onceIn(fmtSec(1 / x.tokens.orb.breath))],
-    [S.rowTempo, (x) => `${Math.round(x.mood.tempo)} BPM${modeRu(x.audio?.mode ?? '') ? `, ${modeRu(x.audio!.mode)}` : ''}`],
+    [S.rowTempo, (x) => `${Math.round(x.mood.tempo)} BPM${audioModeRu(x.audio) ? `, ${audioModeRu(x.audio)}` : ''}`],
     [S.rowTexture, (x) => `${Math.round(x.tokens.grain * 100)}% / ${Math.round(x.tokens.sharpness * 100)}%`],
   ];
   return (

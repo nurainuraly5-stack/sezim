@@ -7,7 +7,7 @@ import type { DayEntry } from '@/core/types';
 import { orbParams, orbSource } from '@/core/orb';
 import { orbFrame, orbSize } from '@/design/tokens';
 import { TECHNIQUES } from '@/core/style-engine';
-import { S, DAYPART_RU, formatDate, formatWeekday, modeRu, moodSummary } from '@/core/strings';
+import { S, DAYPART_RU, formatDate, formatWeekday, modeApprox, modeRu, moodSummary } from '@/core/strings';
 import Orb from './Orb';
 
 export const FEED_LIMIT = 7;
@@ -37,7 +37,7 @@ export default function DayFeed({ days, selected, thumbs, mobile, onPick }: {
             moodSummary(d.mood),
             // без анализа файла темп — оценка, подписываем «≈»
             d.mood.tempo ? `${d.song.analysis ? '' : '≈'}${Math.round(d.mood.tempo)} BPM` : '',
-            modeRu(d.mood.mode),
+            d.song.analysis && modeApprox(d.song.analysis) && d.mood.mode === d.song.analysis.mode ? `≈ ${modeRu(d.mood.mode)}` : modeRu(d.mood.mode),
             TECHNIQUES[d.tokens.technique].name,
           ].filter(Boolean).join(' · ');
           return (

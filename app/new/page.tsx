@@ -8,7 +8,7 @@ import Orb from '@/components/Orb';
 import { warmShaders } from '@/components/gl-warmup';
 import { orbParams } from '@/core/orb';
 import WhyPanel from '@/components/WhyPanel';
-import { S } from '@/core/strings';
+import { S, audioKeyRu, audioModeRu } from '@/core/strings';
 import { analyzePhotos, resizePhoto } from '@/core/analyze/photo';
 import { analyzeAudioFile } from '@/core/analyze/audio';
 import { TEMPO_PRESETS, linkAudio, parseSongLink, type ManualSong } from '@/core/analyze/song-link';
@@ -163,7 +163,7 @@ export default function NewDayPage() {
   const miniFrame = Math.round(orbSize.mini / (orbFrame.radius * 2));
   const frame = Math.min(Math.round((mobile ? orbSize.preview.mobile : orbSize.preview.desktop) / (orbFrame.radius * 2)), Math.floor(previewW / 0.95));
   const audioNote = audioBusy ? S.analyzingAudio
-    : fileAudio ? `${fileAudio.bpm} BPM, ${fileAudio.mode === 'major' ? S.major : fileAudio.mode === 'minor' ? S.minor : 'лад не ясен'}${fileAudio.key ? ` (${fileAudio.key})` : ''}, энергия ${Math.round(fileAudio.energy * 100)}% — ${S.audioReal}`
+    : fileAudio ? `${fileAudio.bpm} BPM, ${audioModeRu(fileAudio) || 'лад не ясен'}${fileAudio.key ? ` (${audioKeyRu(fileAudio)})` : ''}, энергия ${Math.round(fileAudio.energy * 100)}% — ${S.audioReal}`
     : file ? 'Файл не разобрался — темп возьмём из текста.' : '';
 
   return (

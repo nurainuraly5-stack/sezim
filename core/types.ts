@@ -30,6 +30,8 @@ export type AudioFeatures = {
   mode: 'major' | 'minor' | 'unknown';
   key?: string;          // напр. «A minor»
   confidence: number;    // 0..1
+  modeConfidence?: number; // + 0..1 уверенность именно лада (ниже MODE_SURE — «≈»); нет у старых дней и оценок
+  keyAlt?: string;       // + почти так же вероятная параллельная тональность (A minor ↔ C major)
   duration?: number;     // сек
 };
 

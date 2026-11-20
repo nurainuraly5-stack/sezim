@@ -46,6 +46,14 @@ export async function decodeAudio(blob: Blob): Promise<AudioBuffer> {
   return await ctx.decodeAudioData(buf);
 }
 
+/** Разрывы с параллельной тональностью (те же звуки), при которых лад уверенный: по гармонии и по басу.
+ *  Подобраны на синтетических треках (`npm run test:audio`): каденции I–IV–V–I дают ≥ 0.33 / ≥ 0.25,
+ *  поп-петли I–V–vi–IV / i–VI–III–VII — −0.2…0.26 / −0.2…0.2 (их помечаем «≈»). */
+const REL_CHROMA_SURE = 0.36;
+const REL_BASS_SURE = 0.26;
+/** Ниже — лад показывается как приблизительный («≈», с альтернативой). */
+export const MODE_SURE = 0.65;
+
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 export async function analyzeAudioBuffer(ab: AudioBuffer, maxSeconds = 45): Promise<AudioFeatures> {
@@ -78,13 +86,11 @@ export async function analyzeAudioBuffer(ab: AudioBuffer, maxSeconds = 45): Prom
   const chroma = new Array(12).fill(0);
   const bass = new Array(12).fill(0); // бас (40–260 Гц) — подсказка тоники
   let rmsSum = 0, centSum = 0, centW = 0, frames = 0;
-  // таблица высот для бинов
-  const pcOfBin = new Int8Array(half).fill(-1);
-  for (let b = 1; b < half; b++) {
-    const f = (b * sr) / N;
-    if (f < 40 || f > 2100) continue;
-    pcOfBin[b] = (((Math.round(12 * Math.log2(f / 440) + 69) % 12) + 12) % 12);
-  }
+  // Высота — по пикам спектра с параболической доводкой частоты: бин при N=2048 и 22 кГц ≈ 10,8 Гц,
+  // а полутон в басу ≈ 5 Гц — без доводки E2 (82 Гц) попадал в F и ломал лад (E minor → F major).
+  const binHz = sr / N;
+  const mag = new Float32Array(half);
+  const pcOf = (f: number) => (((Math.round(12 * Math.log2(f / 440) + 69) % 12) + 12) % 12);
 
   for (let start = 0; start + N <= x.length; start += HOP) {
     let e = 0;
@@ -94,12 +100,22 @@ export async function analyzeAudioBuffer(ab: AudioBuffer, maxSeconds = 45): Prom
     let fl = 0, num = 0, den = 0;
     for (let b = 1; b < half; b++) {
       const m = Math.hypot(re[b], im[b]);
+      mag[b] = m;
       const lm = Math.log1p(m * 10);
       cur[b] = lm;
       const d = lm - prev[b]; if (d > 0) fl += d;
-      num += m * ((b * sr) / N); den += m;
-      const pc = pcOfBin[b];
-      if (pc >= 0) { const f = (b * sr) / N; if (f >= 65) chroma[pc] += m * m; if (f <= 260) bass[pc] += m * m; }
+      num += m * (b * binHz); den += m;
+    }
+    for (let b = 2; b < half - 1; b++) {
+      const m = mag[b];
+      if (m <= mag[b - 1] || m < mag[b + 1] || b * binHz > 2200) continue;
+      const a = Math.log(mag[b - 1] + 1e-12), c = Math.log(m + 1e-12), e2 = Math.log(mag[b + 1] + 1e-12);
+      const off = clamp((0.5 * (a - e2)) / (a - 2 * c + e2 || 1), -0.5, 0.5);
+      const f = (b + off) * binHz;
+      if (f < 38) continue;
+      const pc = pcOf(f), p = m * m;
+      if (f >= 130) chroma[pc] += m; // гармония — выше баса, амплитуда (не мощность): громкий бас не забивает терции
+      if (f <= 260) bass[pc] += p;
     }
     prev = cur;
     flux.push(fl);
@@ -139,26 +155,42 @@ export async function analyzeAudioBuffer(ab: AudioBuffer, maxSeconds = 45): Prom
     lag += clamp(p, -0.5, 0.5);
   }
   let bpm = (60 * fr) / lag;
-  if (bpm < 70) bpm *= 2; if (bpm > 180) bpm /= 2;
+  if (bpm < 60) bpm *= 2; if (bpm > 180) bpm /= 2;
   const tempoConf = clamp((acf[bi] / (acf0 || 1)) * 2.5);
 
   // лад: корреляция с профилями Крумхансла + вес тоники в басу (разводит параллельные мажор/минор)
   const bassMax = Math.max(...bass) || 1;
+  const scoreMaj: number[] = [], scoreMin: number[] = [];
   let best = -9, bestK = 0, bestMode: 'major' | 'minor' = 'major', bestMaj = -2, bestMin = -2;
   for (let k = 0; k < 12; k++) {
     const rot = chroma.map((_, i) => chroma[(i + k) % 12]);
     const cm = pearson(rot, MAJOR), cn = pearson(rot, MINOR);
     bestMaj = Math.max(bestMaj, cm); bestMin = Math.max(bestMin, cn);
     const tonic = 0.35 * (bass[k] / bassMax);
+    scoreMaj[k] = cm + tonic; scoreMin[k] = cn + tonic;
     if (cm + tonic > best) { best = cm + tonic; bestK = k; bestMode = 'major'; }
     if (cn + tonic > best) { best = cn + tonic; bestK = k; bestMode = 'minor'; }
   }
-  // уверенность: насколько выбранный лад лучше параллельного (та же тоника)
+  // уверенность 1: насколько выбранный лад лучше одноимённого (та же тоника)
   const rotB = chroma.map((_, i) => chroma[(i + bestK) % 12]);
   const sep = Math.abs(pearson(rotB, MAJOR) - pearson(rotB, MINOR));
-  const modeConf = clamp(sep * 4 + Math.abs(bestMaj - bestMin) * 2);
-  const mode: AudioFeatures['mode'] = modeConf < 0.12 ? 'unknown' : bestMode;
+  const parallelConf = clamp(sep * 4 + Math.abs(bestMaj - bestMin) * 2);
+  // уверенность 2: насколько он лучше параллельного (те же звуки: A minor ↔ C major). Петли вроде Am–F–C–G
+  // звучат одинаково в обоих — по хроме их не развести, такой лад помечаем приблизительным и называем второй.
+  const relK = bestMode === 'major' ? (bestK + 9) % 12 : (bestK + 3) % 12;
+  const relChroma = bestMode === 'major' ? scoreMin[relK] : scoreMaj[relK];
+  const tonicBest = 0.35 * (bass[bestK] / bassMax), tonicRel = 0.35 * (bass[relK] / bassMax);
+  const chromaGap = best - tonicBest - (relChroma - tonicRel); // гармония без баса
+  const bassGap = tonicBest - tonicRel;                         // бас: чья тоника звучит чаще
+  // уверенность — по более слабому из двух свидетельств; если бас и гармония спорят — лад приблизительный
+  const modeConf = Math.min(clamp(parallelConf / 0.5), clamp(chromaGap / REL_CHROMA_SURE), clamp(bassGap / REL_BASS_SURE));
+  const mode: AudioFeatures['mode'] = parallelConf < 0.12 ? 'unknown' : bestMode;
   const key = mode === 'unknown' ? undefined : `${NOTES[bestK]} ${bestMode}`;
+  // альтернатива — та тональность, с которой спор сильнее: одноимённая (A minor ↔ A major) или параллельная (A minor ↔ C major)
+  const relConf = Math.min(clamp(chromaGap / REL_CHROMA_SURE), clamp(bassGap / REL_BASS_SURE));
+  const flip = bestMode === 'major' ? 'minor' : 'major';
+  const keyAlt = mode !== 'unknown' && modeConf < MODE_SURE
+    ? (clamp(parallelConf / 0.5) < relConf ? `${NOTES[bestK]} ${flip}` : `${NOTES[relK]} ${flip}`) : undefined;
 
   const rmsMean = rmsSum / frames;
   const db = 20 * Math.log10(rmsMean + 1e-9);
@@ -167,7 +199,7 @@ export async function analyzeAudioBuffer(ab: AudioBuffer, maxSeconds = 45): Prom
   const brightness = clamp((centW ? centSum / centW : 1500) / 3500);
 
   return {
-    source: 'audio', bpm: Math.round(bpm), energy, brightness, mode, key,
+    source: 'audio', bpm: Math.round(bpm), energy, brightness, mode, key, keyAlt, modeConfidence: modeConf,
     confidence: clamp(0.5 * tempoConf + 0.5 * modeConf), duration: dur,
   };
 }
