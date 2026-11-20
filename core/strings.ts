@@ -23,6 +23,10 @@ export const S = {
   songOfDay: 'Песня дня',
   metaEstimate: 'вид рассчитан по названию песни, не по звуку',
   pickDay: 'Выбери сферу, чтобы посмотреть день.',
+  viewOrbs: 'Сферы',
+  viewFeed: 'Лента',
+  viewLabel: 'Вид архива',
+  feedLimit: (k: number, n: number) => `Последние ${k} дней подряд из ${n}. Остальные — в «Сферах» или через поиск.`,
   // день
   backToArchive: 'Назад к архиву',
   aboutDay: 'О чём этот день?',

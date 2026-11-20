@@ -75,8 +75,9 @@ export default function Orb({ params, size, live = false, hover = false, thumbUr
     );
   }
   if (showThumb) {
+    // maxWidth: none — иначе базовый стиль Tailwind (img max-width:100%) сжимает кадр в узкой колонке
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={thumbUrl} alt="" width={size} height={size} className={className} style={{ width: size, height: size, display: 'block', ...style }} draggable={false} />;
+    return <img src={thumbUrl} alt="" width={size} height={size} className={className} style={{ width: size, height: size, maxWidth: 'none', display: 'block', ...style }} draggable={false} />;
   }
   return <canvas ref={ref} className={className} style={{ width: size, height: size, display: 'block', ...style }} aria-hidden />;
 }

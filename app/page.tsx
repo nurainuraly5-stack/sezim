@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AppShell from '@/components/AppShell';
 import DayPanel from '@/components/DayPanel';
+import DayFeed from '@/components/DayFeed';
 import OrbGrid from '@/components/OrbGrid';
 import { useOrbThumbs } from '@/components/useOrbThumbs';
 import { useMedia } from '@/components/useMedia';
@@ -13,6 +14,8 @@ import { S, formatDate, formatMonth } from '@/core/strings';
 import type { DayEntry } from '@/core/types';
 
 const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
+type View = 'orbs' | 'feed';
+const VIEW_KEY = 'sezim.archiveView';
 
 export default function ArchivePage() {
   const router = useRouter();
@@ -23,6 +26,16 @@ export default function ArchivePage() {
   const [selected, setSelected] = useState<string>();
   const mobile = useMedia('(max-width: 767px)');
   const withPanel = useMedia('(min-width: 1280px)', true);
+  const [view, setView] = useState<View>('orbs');
+
+  // выбранный вид — удобство одного зрителя: помним в localStorage, без него работает вид по умолчанию
+  useEffect(() => {
+    try { if (localStorage.getItem(VIEW_KEY) === 'feed') setView('feed'); } catch {}
+  }, []);
+  function changeView(v: View) {
+    setView(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch {}
+  }
 
   useEffect(() => {
     (async () => {
@@ -79,7 +92,16 @@ export default function ArchivePage() {
           <section className="mt-10" aria-labelledby="mem-h">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 id="mem-h" className="t-h2">{S.yourMemories}</h2>
-              {days && <p className="t-caption" aria-live="polite">{S.shown(shown.length, all.length)}</p>}
+              <div className="flex items-center gap-3">
+                {days && <p className="t-caption" aria-live="polite">{S.shown(shown.length, all.length)}</p>}
+                <div className="flex gap-1 rounded-[var(--r-pill)] border border-line bg-surface p-1" role="group" aria-label={S.viewLabel}>
+                  {(['orbs', 'feed'] as const).map((v) => (
+                    <button key={v} className="chip border-transparent" aria-pressed={view === v} onClick={() => changeView(v)}>
+                      {v === 'orbs' ? S.viewOrbs : S.viewFeed}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             {months.length > 1 && (
               <div className="no-scrollbar -mx-1 mt-4 flex gap-2 overflow-x-auto px-1" role="group" aria-label="Фильтр по дате">
@@ -104,8 +126,9 @@ export default function ArchivePage() {
                   <button className="btn" onClick={() => { setQ(''); setMonth(null); }}>{S.resetFilter}</button>
                 </div>
               )}
-              {shown.length > 0 && (
-                <OrbGrid days={shown} selected={withPanel ? current?.id : undefined} thumbs={thumbs} mobile={mobile} onPick={pick} />
+              {shown.length > 0 && (view === 'feed'
+                ? <DayFeed days={shown} selected={withPanel ? current?.id : undefined} thumbs={thumbs} mobile={mobile} onPick={pick} />
+                : <OrbGrid days={shown} selected={withPanel ? current?.id : undefined} thumbs={thumbs} mobile={mobile} onPick={pick} />
               )}
             </div>
           </section>
