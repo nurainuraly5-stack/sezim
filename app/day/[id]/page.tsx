@@ -53,6 +53,14 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
   const [songPause, setSongPause] = useState(0);
   const player = useRef<DayPlayer | null>(null);
   const [orbColRef, orbCol] = useWidth(600);
+  // Первая компиляция шейдеров сцены занимает до 1,5 с главного потока — сначала даём отрисоваться
+  // тексту и карточкам, WebGL подключаем после первого кадра.
+  const [glReady, setGlReady] = useState(false);
+  useEffect(() => {
+    let t = 0;
+    const raf = requestAnimationFrame(() => { t = window.setTimeout(() => setGlReady(true), 0); });
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, []);
 
   // «Слушать день» показываем, только если голос реально есть: сохранённый, серверный TTS или русский голос браузера
   useEffect(() => {
@@ -73,8 +81,10 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
   }, [glFailed, d.photos]);
 
   function stopListening() {
-    player.current?.stop();
+    // сначала отвязываем: stop() вызывает onVoiceState(false), который не должен прийти сюда повторно
+    const p = player.current;
     player.current = null;
+    p?.stop();
     setListening(false);
   }
 
@@ -84,6 +94,9 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
     setSongPause((k) => k + 1);
     const p = new DayPlayer(d);
     player.current = p;
+    // песня по ссылке играет во встроенном плеере, не здесь: когда голос дочитал, слушать больше нечего
+    const hasMusic = d.song.kind === 'file' && !!d.song.file;
+    p.onVoiceState = (speaking) => { if (!speaking && !hasMusic && player.current === p) stopListening(); };
     setListening(true);
     await p.start();
     // голоса ещё нет, а TTS настроен — синтезируем и сохраняем в папку дня (ждём не дольше 6 с, иначе голос браузера)
@@ -96,7 +109,9 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
       setVoiceRendering(false);
       if (blob) { await p.prepareVoice(blob); await putDay({ ...d, voice: blob }); }
     }
-    if (player.current === p) p.playVoice();
+    if (player.current !== p) return;
+    p.playVoice();
+    if (p.voiceMode === 'none' && !hasMusic) stopListening();
   }
 
   async function saveTitle() {
@@ -138,17 +153,17 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
         </Link>
 
         <header className="mt-5 flex flex-col items-start gap-4">
-          <p className="chip">{formatDate(d.date).replace(/\s*г\.?$/, '')}, {formatWeekday(d.date)}{daypart ? `, ${daypart}` : ''}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="chip">{formatDate(d.date).replace(/\s*г\.?$/, '')}, {formatWeekday(d.date)}{daypart ? `, ${daypart}` : ''}</p>
+            {!editing && <button className="btn btn-quiet min-h-[32px] px-3" onClick={() => setEditing(true)}>{S.rename}</button>}
+          </div>
           {editing ? (
             <form onSubmit={(e) => { e.preventDefault(); saveTitle(); }} className="flex w-full max-w-3xl flex-wrap items-center gap-3">
               <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} maxLength={70} aria-label="Название дня" className="field t-h2 flex-1" />
               <button className="btn btn-primary" type="submit">{S.save}</button>
             </form>
           ) : (
-            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-              <h1 className="t-display max-w-4xl">{d.mood.title}</h1>
-              <button className="btn btn-quiet" onClick={() => setEditing(true)}>{S.rename}</button>
-            </div>
+            <h1 className="t-display max-w-4xl">{d.mood.title}</h1>
           )}
           <p className="t-body soft measure">«{d.mood.quote}»</p>
           <ul className="flex flex-wrap gap-2" aria-label="Коротко о дне">
@@ -164,13 +179,13 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
               // без WebGL — фото как есть, честно без обработки
               // eslint-disable-next-line @next/next/no-img-element
               photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-            ) : (
+            ) : glReady && (
               <MemoryScene photos={d.photos} tokens={d.tokens} id={d.id} intensity={1} onFail={() => setGlFailed(true)} />
             )}
           </div>
           <div ref={orbColRef} className="flex min-w-0 flex-col items-center gap-4">
             <div className="relative w-full" style={{ height: heroFrame * 0.86, maxWidth: heroFrame }}>
-              <Orb params={params} size={heroFrame} live className="absolute left-1/2" style={{ top: -heroFrame * 0.05, marginLeft: -heroFrame / 2 }} />
+              {glReady && <Orb params={params} size={heroFrame} live className="pointer-events-none absolute left-1/2" style={{ top: -heroFrame * 0.05, marginLeft: -heroFrame / 2 }} />}
             </div>
             {voiceOk && (
               <button className="btn btn-primary w-full max-w-sm" onClick={listen} aria-pressed={listening}>

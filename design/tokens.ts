@@ -114,6 +114,7 @@ export const orbFrame = {
 export const orbSize = {
   archive: { desktop: 132, mobile: 100 },
   feed: { desktop: 76, mobile: 60 },
+  mini: 48, // плавающее превью на телефоне (/new)
   hero: { desktop: 360, mobile: 240 },
   preview: { desktop: 300, mobile: 220 },
   thumb: 384, // сторона кэш-миниатюры (px)

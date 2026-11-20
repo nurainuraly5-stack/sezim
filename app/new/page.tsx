@@ -47,7 +47,9 @@ export default function NewDayPage() {
   const [audioBusy, setAudioBusy] = useState(false);
   const [manual, setManual] = useState<{ bpm?: number; mode?: 'major' | 'minor' | 'unknown' }>({});
 
-  const [errors, setErrors] = useState<string[]>([]);
+  // ошибки показываем после первой попытки и пересчитываем на лету: заполнил поле — строка исчезла
+  const [tried, setTried] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [titleEdit, setTitleEdit] = useState<string | null>(null); // null — название предлагает система
   const [creating, setCreating] = useState(false);
   const [step, setStep] = useState(0);
@@ -116,13 +118,16 @@ export default function NewDayPage() {
     text: debText.trim(), createdAt: draftAt, mood: preview.mood, tokens: preview.tokens, photo: photoFeatures, audio, meta,
   }), [debText, draftAt, preview, photoFeatures, audio, meta]);
 
+  const missing: string[] = [];
+  if (text.trim().split(/\s+/).length < 4) missing.push(S.needText);
+  if (!photos.length) missing.push(S.needPhoto);
+  if (!hasSong) missing.push(S.needSong);
+  const errors = [...(tried ? missing : []), ...(saveError ? [saveError] : [])];
+
   async function submit() {
-    const errs: string[] = [];
-    if (text.trim().split(/\s+/).length < 4) errs.push(S.needText);
-    if (!photos.length) errs.push(S.needPhoto);
-    if (!hasSong) errs.push(S.needSong);
-    setErrors(errs);
-    if (errs.length) return;
+    setTried(true);
+    setSaveError('');
+    if (missing.length) return;
     setCreating(true);
     const timer = setInterval(() => setStep((s) => Math.min(s + 1, S.steps.length - 1)), 900);
     try {
@@ -136,7 +141,7 @@ export default function NewDayPage() {
       router.push(`/day/${day.id}?new=1`);
     } catch (e) {
       console.error(e);
-      setErrors(['Не получилось сохранить день. Попробуй ещё раз.']);
+      setSaveError(S.saveFailed);
       setCreating(false);
     } finally {
       clearInterval(timer);
@@ -145,6 +150,18 @@ export default function NewDayPage() {
 
   const mobile = useMedia('(max-width: 767px)');
   const [previewRef, previewW] = useWidth(360);
+  // На телефоне превью стоит под формой: пока оно не на экране, показываем маленькую сферу с палитрой —
+  // причинность «добавил фото/песню → сфера изменилась» видна без прокрутки.
+  const asideRef = useRef<HTMLElement>(null);
+  const [previewInView, setPreviewInView] = useState(true);
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => setPreviewInView(e.isIntersecting), { threshold: 0.25 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  const miniFrame = Math.round(orbSize.mini / (orbFrame.radius * 2));
   const frame = Math.min(Math.round((mobile ? orbSize.preview.mobile : orbSize.preview.desktop) / (orbFrame.radius * 2)), Math.floor(previewW / 0.95));
   const audioNote = audioBusy ? S.analyzingAudio
     : fileAudio ? `${fileAudio.bpm} BPM, ${fileAudio.mode === 'major' ? S.major : fileAudio.mode === 'minor' ? S.minor : 'лад не ясен'}${fileAudio.key ? ` (${fileAudio.key})` : ''}, энергия ${Math.round(fileAudio.energy * 100)}% — ${S.audioReal}`
@@ -254,12 +271,30 @@ export default function NewDayPage() {
           </button>
         </section>
 
-        <aside aria-label={S.livePreview} className="lg:sticky lg:top-10 lg:self-start">
+        {mobile && !previewInView && (
+          <button
+            type="button" onClick={() => asideRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            aria-label={S.toPreview}
+            // узкая колонка справа: не перекрывает кнопку «Создать» (она слева); фон непрозрачный
+            className="fixed bottom-4 right-4 z-30 flex w-16 flex-col items-center gap-1.5 border border-line pb-2.5 pt-1"
+            style={{ borderRadius: 'var(--r-pill)', background: 'var(--c-bg)', boxShadow: 'var(--shadow-card)' }}
+          >
+            <span className="relative block overflow-hidden rounded-full" style={{ width: orbSize.mini + 8, height: orbSize.mini + 8 }}>
+              <Orb params={previewOrb} size={miniFrame} className="pointer-events-none absolute left-1/2"
+                style={{ top: 4 + orbSize.mini / 2 - miniFrame * orbFrame.cy, marginLeft: -miniFrame / 2 }} />
+            </span>
+            <span className="flex gap-[3px]" aria-hidden>
+              {preview.tokens.palette.slice(0, 5).map((c, i) => <span key={i} className="h-2 w-2 rounded-full" style={{ background: c }} />)}
+            </span>
+          </button>
+        )}
+
+        <aside ref={asideRef} aria-label={S.livePreview} className="scroll-mt-20 lg:sticky lg:top-10 lg:self-start">
           <div ref={previewRef} className="card flex flex-col gap-5 p-5">
             <h2 className="t-h3">{S.livePreview}</h2>
             <div className="relative mx-auto w-full" style={{ height: frame * 0.86, maxWidth: frame }}>
               <Orb params={previewOrb} size={frame} live hover={creating} speed={creating ? 3 : 1}
-                className="absolute left-1/2" style={{ top: -frame * 0.05, marginLeft: -frame / 2 }} />
+                className="pointer-events-none absolute left-1/2" style={{ top: -frame * 0.05, marginLeft: -frame / 2 }} />
             </div>
             {creating && <p className="t-caption text-center" aria-live="polite">{S.steps[step]}</p>}
             <label className="flex flex-col gap-2">
