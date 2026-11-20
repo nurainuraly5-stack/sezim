@@ -22,17 +22,25 @@ async function oembed(url: string): Promise<{ title?: string; artist?: string } 
     const r = await fetch(endpoint, { signal: AbortSignal.timeout(3500) });
     if (!r.ok) return null;
     const j = (await r.json()) as OEmbed;
-    let title = j.title, artist = j.author_name;
-    // YouTube: «Исполнитель - Песня»
-    if (title && / [-–—] /.test(title)) {
-      const [a, ...rest] = title.split(/ [-–—] /);
-      artist = a.trim(); title = rest.join(' - ').replace(/\s*[([].*?(official|video|audio|lyrics|клип).*?[)\]]/gi, '').trim();
-    }
-    artist = artist?.replace(/ - Topic$/, '');
-    return { title, artist };
+    return parseOembedTitle(j.title, j.author_name);
   } catch {
     return null;
   }
+}
+
+const loose = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+/** YouTube: «Исполнитель - Песня (Official video)» → исполнитель и песня. Если после тире стоит имя канала
+ *  («Трек — afterhours.sound»), это не исполнитель: песня — начало, исполнитель — канал. */
+function parseOembedTitle(raw?: string, author?: string): { title?: string; artist?: string } {
+  let title = raw, artist = author?.replace(/ - Topic$/, '');
+  if (title && / [-–—] /.test(title)) {
+    const parts = title.split(/ [-–—] /);
+    if (artist && loose(parts[parts.length - 1]) === loose(artist)) title = parts.slice(0, -1).join(' - ');
+    else { artist = parts[0].trim(); title = parts.slice(1).join(' - '); }
+  }
+  title = title?.replace(/\s*[([][^)\]]*?(official|video|audio|lyrics|клип)[^)\]]*?[)\]]/gi, '').trim();
+  return { title: title || undefined, artist: artist || undefined };
 }
 
 export async function POST(req: Request) {
