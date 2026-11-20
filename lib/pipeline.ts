@@ -26,7 +26,7 @@ export function previewStyle(text: string, photo?: PhotoFeatures, audio?: AudioF
   return { text: tf, mood, ...buildStyle({ mood, text: tf, photo, audio, meta }) };
 }
 
-type AnalyzeResponse = {
+export type AnalyzeResponse = {
   llm: (Omit<TextFeatures, 'voiceStyle' | 'wordCount' | 'engine'> & { voicePace: 'slow' | 'mid' | 'fast' }) | null;
   llmReason?: string;
   songMeta: { title?: string; artist?: string } | null;
@@ -114,9 +114,14 @@ export function voiceScript(title: string, quote: string) {
   return norm(quote).startsWith(norm(title)) ? q : `${title.replace(/[.…]+$/, '')}. ${q}`;
 }
 
-export async function createDay(input: DraftInputs, opts: { titleOverride?: string; seed?: boolean; id?: string; createdAt?: number } = {}): Promise<DayEntry> {
+/** opts.remote — уже полученный ответ /api/analyze (seed готовит дни параллельно); undefined — запросить здесь. */
+export async function createDay(input: DraftInputs, opts: {
+  titleOverride?: string; seed?: boolean; id?: string; createdAt?: number;
+  remote?: AnalyzeResponse | null; authorTitle?: string;
+} = {}): Promise<DayEntry> {
   const fallback = analyzeTextFallback(input.text);
-  const remote = opts.seed ? null : await analyzeRemote(input.text, input.song.kind === 'link' ? input.song.url : undefined);
+  const remote = opts.remote !== undefined ? opts.remote
+    : await analyzeRemote(input.text, input.song.kind === 'link' ? input.song.url : undefined);
   const text = mergeText(fallback, remote?.llm ?? null);
   const meta: SongMeta | undefined = input.song.meta || remote?.songMeta
     ? { ...(remote?.songMeta ?? {}), ...stripEmpty(input.song.meta) }
@@ -136,7 +141,7 @@ export async function createDay(input: DraftInputs, opts: { titleOverride?: stri
     id: opts.id ?? newId(), date: input.date, text: input.text, photos: input.photos,
     song: { ...input.song, meta, analysis: input.audio },
     mood, tokens, explain, voice, thumb, thumbV: thumb ? ORB_RENDER_VERSION : undefined, createdAt,
-    analysisEngine: text.engine, photoFeatures: input.photoFeatures, seed: opts.seed,
+    analysisEngine: text.engine, photoFeatures: input.photoFeatures, seed: opts.seed, authorTitle: opts.authorTitle,
   };
   await putDay(day);
   return day;

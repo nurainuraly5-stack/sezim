@@ -67,4 +67,5 @@ export type DayEntry = {
   analysisEngine?: 'llm' | 'fallback'; // + честная пометка «упрощённый анализ»
   photoFeatures?: PhotoFeatures;       // + для «Почему» и A/B
   seed?: boolean;                      // + день из seed-дневника
+  authorTitle?: string;                // + рабочее название автора (seed meta.json) — только справка, не название дня
 };

@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9d6c4"/><stop offset="1" stop-color="#5f735c"/></linearGradient><filter id="b"><feGaussianBlur stdDeviation="8"/></filter><filter id="b2"><feGaussianBlur stdDeviation="30"/></filter></defs>
-<rect width="1200" height="900" fill="url(#g)"/>
-<g fill="#7d8f78" filter="url(#b)"><polygon points="100,700 180,250 260,700"/><polygon points="380,720 450,300 520,720"/><polygon points="760,720 840,240 920,720"/><polygon points="1000,700 1070,320 1140,700"/></g>
-<g fill="#3f523d"><polygon points="220,900 320,300 420,900"/><polygon points="560,900 660,220 760,900"/><polygon points="880,900 980,330 1080,900"/></g>
-<rect y="560" width="1200" height="200" fill="#eef2ea" opacity="0.4" filter="url(#b2)"/>
-<polygon points="560,0 700,0 900,900 500,900" fill="#fffbe6" opacity="0.18"/></svg>

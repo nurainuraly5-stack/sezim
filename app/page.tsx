@@ -11,7 +11,7 @@ import { useMedia } from '@/components/useMedia';
 import { warmShaders } from '@/components/gl-warmup';
 import { orbParams, orbSource } from '@/core/orb';
 import { listDays } from '@/lib/db';
-import { seedIfEmpty } from '@/lib/seed';
+import { reseed, seedIfEmpty } from '@/lib/seed';
 import { S, formatDate, formatMonth } from '@/core/strings';
 import type { DayEntry } from '@/core/types';
 
@@ -41,8 +41,12 @@ export default function ArchivePage() {
 
   useEffect(() => {
     (async () => {
+      // ?reseed=1 — пересобрать демо-дни (например, после того как на сервере появился ключ LLM); параметр убираем из адреса
+      const url = new URL(window.location.href);
+      const again = url.searchParams.has('reseed');
+      if (again) { url.searchParams.delete('reseed'); window.history.replaceState(null, '', url); }
       try {
-        await seedIfEmpty(async (i, n) => {
+        await (again ? reseed : seedIfEmpty)(async (i, n) => {
           setSeeding(i < n ? [i, n] : null);
           setDays(await listDays());
         });

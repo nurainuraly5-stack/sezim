@@ -25,6 +25,7 @@ export async function exportDayZip(d: DayEntry): Promise<Blob> {
   const root = zip.folder(folderName(d))!;
   root.file('entry.json', JSON.stringify({
     id: d.id, date: d.date, title: d.mood.title, text: d.text, createdAt: d.createdAt,
+    ...(d.authorTitle ? { authorTitle: d.authorTitle } : {}), // справка: рабочее название автора, основное — title
     analysis: d.analysisEngine === 'llm' ? 'llm' : 'fallback (упрощённый анализ)',
     made_with: 'Sezim — Days you can feel again.',
   }, null, 2));

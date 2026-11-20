@@ -1,7 +1,8 @@
 // Тест названий без LLM: `npm run test:titles`. Название — только из слов текста и всегда 3–7 слов.
 import { analyzeTextFallback } from '../core/analyze/text-fallback';
-import { SEED } from '../lib/seed-data';
-const SEED_TEXTS = SEED.map((d) => d.text);
+import { readFileSync } from 'node:fs';
+import { SEED_DAYS, SEED_DIR } from '../lib/seed-data';
+const SEED_TEXTS = SEED_DAYS.map((d) => readFileSync(new URL(`../public${SEED_DIR}/${d.dir}/text.md`, import.meta.url), 'utf8').trim());
 
 let fails = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? '✓' : '✗'} ${msg}`); if (!cond) fails++; };
