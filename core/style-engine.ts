@@ -4,8 +4,10 @@
 import type { AudioFeatures, MoodProfile, PhotoFeatures, SongMeta, StyleTokens, TechniqueId, TextFeatures } from './types';
 import {
   adjust, clamp, hexToHsl, hslToHex, lerp, luminance, mix, shiftTemperature, temperature,
+  temperatureHue,
 } from './color';
 import { metaGenreGuess } from './analyze/song-link';
+import { audioKeyRu, modeApprox } from './strings';
 
 export const TECHNIQUES: Record<TechniqueId, { name: string; ref: string }> = {
   softStrokes: { name: 'Soft Strokes', ref: 'импрессионизм: мазки и мягкий свет' },
@@ -62,12 +64,13 @@ export function chooseTechnique(input: EngineInput): { id: TechniqueId; why: str
   return { id: best, why: s[best].why.filter(Boolean) };
 }
 
-/** Палитра без фото: непрерывная ось температуры, а не словарь эмоций. */
+/** Палитра без фото: непрерывная ось температуры (холод → сирень → тепло, в обход зелёного), а не словарь эмоций. */
 function syntheticPalette(mood: MoodProfile): string[] {
-  const hue = lerp(220, 26, mood.warmth);
+  const hue = temperatureHue(mood.warmth);
   const sat = lerp(0.25, 0.75, mood.arousal);
   const light = lerp(0.32, 0.62, mood.valence);
-  const comp = hue + 140 + mood.contrast * 40;
+  // второй цвет — с противоположного конца той же оси (чем сильнее противоречие, тем дальше), не «комплементарный» зелёный
+  const comp = temperatureHue(clamp(1 - mood.warmth + (mood.warmth - 0.5) * (1 - mood.contrast)));
   return [
     hslToHex([hue + 10, sat * 0.6, 0.1]),
     hslToHex([hue, sat * 0.8, light * 0.6]),
@@ -94,7 +97,7 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
   while (base.length < 5) base.push(mix(base[0], base[base.length - 1], 0.5 + base.length * 0.1));
 
   // 2. Музыка трансформирует: лад → тёплая/холодная доля, энергия → насыщенность, яркость звука → светлота
-  const modeShift = audio && audio.mode !== 'unknown' ? 0.22 * conf : 0;
+  const modeShift = audio && audio.mode !== 'unknown' ? 0.22 * conf * (audio.modeConfidence ?? 1) : 0;
   base = base.map((c, i) => {
     let x = modeShift ? shiftTemperature(c, audio!.mode === 'major', modeShift * (i % 2 ? 1 : 0.6)) : c;
     x = adjust(x, { sat: 0.7 + energy * 0.6, light: ((audio?.brightness ?? 0.5) - 0.5) * 0.12 * conf });
@@ -120,12 +123,20 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
   rim = adjust(rim, { sat: 1.1, light: 0.05 });
   // при низком противоречии ядро и оболочка сближаются
   core = mix(rim, core, clamp(0.35 + mood.contrast));
+  // смешение в RGB уводит тёплое ядро на холодной оболочке в фиолетовый — возвращаем ядру его температуру
+  const coreGap2 = innerT - temperature(core);
+  if (Math.abs(coreGap2) > 0.12) core = shiftTemperature(core, coreGap2 > 0, Math.min(1, Math.abs(coreGap2) * 2));
   // температура видна только при насыщенности: чем дальше слой от нейтрали, тем насыщеннее он должен быть
   // (иначе «тёплое ядро» серых фото остаётся серым и смешанное состояние не читается)
   const minSat = (t: number) => clamp(Math.abs(t - 0.5) * 1.1 + mood.contrast * 0.25, 0, 0.7);
   // защита от слишком тёмных цветов слоёв (тяжесть дня передаёт затемнение сферы, а не грязный цвет)
-  const [ch, cs, cl] = hexToHsl(core); core = hslToHex([ch, Math.max(cs, minSat(innerT)), Math.max(cl, 0.5)]);
-  const [rh, rs, rl] = hexToHsl(rim); rim = hslToHex([rh, Math.max(rs, minSat(outerT)), Math.max(rl, 0.38)]);
+  // у почти серого слоя оттенок — шум (серо-голубое фото давало ярко-синюю оболочку): при насыщении берём оттенок с оси температуры
+  const layer = (c: string, t: number, minL: number) => {
+    const [h, s, l] = hexToHsl(c);
+    return hslToHex([s < 0.12 ? temperatureHue(t) : h, Math.max(s, minSat(t)), Math.max(l, minL)]);
+  };
+  core = layer(core, innerT, 0.5);
+  rim = layer(rim, outerT, 0.38);
 
   // 4. Числовые токены
   const year = meta?.year;
@@ -151,7 +162,7 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
   const explain: string[] = [];
   explain.push(`${TECHNIQUES[technique.id].name} (${TECHNIQUES[technique.id].ref}): ${technique.why.slice(0, 3).join(', ') || 'нейтральный день'}.`);
   if (audio?.source === 'audio') {
-    explain.push(`Песня: ~${audio.bpm} BPM, ${modeRu(audio.mode)}${audio.key ? ` (${audio.key})` : ''} — анализ файла → сфера делает вдох раз в ${fmt(1 / breath)} с, кадры меняются каждые ${fmt(rhythm)} с.`);
+    explain.push(`Песня: ~${audio.bpm} BPM, ${modeApprox(audio) ? `${modeRu(audio.mode)} приблизительно (${audioKeyRu(audio)}) — его вклад в палитру ослаблен` : `${modeRu(audio.mode)}${audio.key ? ` (${audio.key})` : ''}`} — анализ файла → сфера делает вдох раз в ${fmt(1 / breath)} с, кадры меняются каждые ${fmt(rhythm)} с.`);
   } else if (audio?.source === 'meta') {
     explain.push(`Песня по ссылке: темп ~${audio.bpm} и ${modeRu(audio.mode)} — оценка по названию${genre ? ` и жанру (${genre})` : ''}, не анализ аудио → ритм кадров ${fmt(rhythm)} с.`);
   } else if (audio?.source === 'manual') {

@@ -8,6 +8,8 @@
 // 3. Детерминизм: один и тот же день → одинаковые параметры.
 // 4. Seed-дневник (scripts/fixtures/seed-days.json — признаки, снятые в браузере с production-сборки):
 //    ≥ 4 визуально разных настроения, среди них тёмное/тяжёлое и смешанное.
+// 5. Грустный, но тёплый день: ядро тёплое, сфера не синяя и не зелёная (при синих фото синяя только оболочка).
+// 6. Дни без фото: ни одной зелёной сферы (ось температуры идёт через сиреневый).
 //
 // Пороги: палитра — средний ΔE в OKLab 0.04 (≈ 2 порога различимости цвета 0.02);
 // структура — 0.15 в пространстве весов/фаз (≈ сдвиг рисунка на 1/7 периода или смена веса слоя на 15%);
@@ -68,7 +70,7 @@ function randomAudio(): AudioFeatures | undefined {
   };
 }
 
-function makeSource(text: string, photo: PhotoFeatures, audio: AudioFeatures | undefined, createdAt: number): OrbSource {
+function makeSource(text: string, photo: PhotoFeatures | undefined, audio: AudioFeatures | undefined, createdAt: number): OrbSource {
   const tf = analyzeTextFallback(text);
   const mood = buildMood(tf, photo, audio);
   const { tokens } = buildStyle({ mood, text: tf, photo, audio });
@@ -126,6 +128,57 @@ const distinct = new Set(classes.map((c) => c.key));
 ok(distinct.size >= 4, `визуально разных настроений: ${distinct.size} (нужно ≥ 4)`);
 ok(classes.some((c) => c.tone === 'dark'), 'есть тёмное/тяжёлое');
 ok(classes.some((c) => c.temp === 'mixed'), 'есть смешанное (холодная оболочка + тёплое ядро или наоборот)');
+
+// 5. Грустный, но тёплый день не даёт синюю (и зелёную) сферу
+console.log('\n5. Грустный, но тёплый день');
+const hueOf = ([r, g, b]: number[]) => {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  if (mx - mn < 0.03) return NaN;
+  const h = mx === r ? (g - b) / (mx - mn) : mx === g ? 2 + (b - r) / (mx - mn) : 4 + (r - g) / (mx - mn);
+  return (h * 60 + 360) % 360;
+};
+const isWarmHue = (h: number) => Number.isNaN(h) || h <= 60 || h >= 300; // красный–оранжевый–розовый
+const isBlueOrGreen = (h: number) => h >= 75 && h <= 260;
+const SAD_WARM = [
+  'Проводили бабушку. Было очень грустно, все плакали. Но потом сидели на кухне, пили горячий чай, обнимались и вспоминали её пироги. Тепло и больно одновременно.',
+  'Последний вечер перед переездом. Грустно прощаться с друзьями. Горели свечи, было тепло, мы обнимались и долго молчали.',
+  'Немного грустно и пусто. Сидела у камина под пледом, пила какао, за окном шёл дождь.',
+];
+const minorSong: AudioFeatures = { source: 'audio', bpm: 68, energy: 0.2, brightness: 0.3, mode: 'minor', key: 'A minor', confidence: 0.9, modeConfidence: 0.9 };
+const photoOf = (hexes: string[], warmth: number): PhotoFeatures => ({
+  palette: hexes.map((hex, i) => ({ hex, weight: [0.4, 0.25, 0.15, 0.12, 0.08][i] })), brightness: 0.38, contrast: 0.3, saturation: 0.35, warmth, count: 2,
+});
+const SAD_CASES: [string, PhotoFeatures | undefined, AudioFeatures | undefined][] = [
+  ['только текст', undefined, undefined],
+  ['текст + минор', undefined, minorSong],
+  ['тёплые фото + минор', photoOf(['#5a3a28', '#8a5a3a', '#c08850', '#2a1a14', '#e0b080'], 0.8), minorSong],
+  ['серые фото + минор', photoOf(['#55585c', '#3a3d40', '#7a7d80', '#202224', '#9a9c9e'], 0.45), minorSong],
+];
+const bluePhotos = photoOf(['#2a3a50', '#3a5070', '#1a2030', '#5070a0', '#8090b0'], 0.2);
+let sadBad = 0, blueCoreBad = 0;
+for (const t of SAD_WARM) {
+  for (const [name, photo, audio] of SAD_CASES) {
+    const p = orbParams(makeSource(t, photo, audio, Date.UTC(2026, 10, 20)));
+    const hc = hueOf(p.core), hs = hueOf(p.shell), c = orbMoodClass(p);
+    // при серых фото оболочка может быть холоднее (снаружи серо), но не синей и не зелёной; ядро — тёплое
+    const bad = !isWarmHue(hc) || isBlueOrGreen(hs) || c.temp === 'cool';
+    console.log(`  ${bad ? '✗' : '·'} ${t.slice(0, 28)}… / ${name.padEnd(20)} ядро ${hc.toFixed(0).padStart(3)}°, оболочка ${hs.toFixed(0).padStart(3)}°, ${c.key}`);
+    if (bad) sadBad++;
+  }
+  // синие фото: оболочка честно синяя (это палитра снимков), но тёплое ядро остаётся тёплым
+  const p = orbParams(makeSource(t, bluePhotos, minorSong, Date.UTC(2026, 10, 20)));
+  const hc = hueOf(p.core);
+  console.log(`  ${isWarmHue(hc) ? '·' : '✗'} ${t.slice(0, 28)}… / ${'синие фото + минор'.padEnd(20)} ядро ${hc.toFixed(0).padStart(3)}°, оболочка ${hueOf(p.shell).toFixed(0).padStart(3)}° (из фото)`);
+  if (!isWarmHue(hc)) blueCoreBad++;
+}
+ok(sadBad === 0, `грустный тёплый день: ядро тёплое, сфера не синяя и не зелёная (${SAD_WARM.length * SAD_CASES.length} вариантов)`);
+ok(blueCoreBad === 0, 'грустный тёплый день на синих фото: оболочка из фото, ядро всё равно тёплое');
+
+// 6. Без фото палитра идёт по оси температуры в обход зелёного
+console.log('\n6. Дни без фото');
+const noPhoto = Array.from({ length: 200 }, () => orbParams(makeSource(randomText(), undefined, randomAudio(), Date.UTC(2026, 0, 1) + Math.floor(rand() * 330 * 864e5))));
+const greenish = noPhoto.filter((p) => [hueOf(p.core), hueOf(p.shell)].some((h) => h >= 75 && h <= 170)).length;
+ok(greenish === 0, `зелёных/бирюзовых сфер: ${greenish} из 200`);
 
 console.log(fails ? `\n✗ провалено проверок: ${fails}` : '\n✓ все проверки пройдены');
 process.exit(fails ? 1 : 0);

@@ -61,13 +61,25 @@ export const luminance = (hex: string) => {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 };
 
-/** Сдвиг оттенка к тёплому (35°) или холодному (215°) полюсу на долю amt. */
+/** Ось температуры по кругу оттенков: холодный полюс 214° → сиреневый → тёплый 32°, в обход зелёного.
+ *  Кратчайшая дуга от голубого к оранжевому идёт через зелёный (120°) — грустный тёплый день становился
+ *  зелёным/оливковым. Координата u: разрез оси — в зелёном (u = 0 при 120°), полюса — u(214°)=94, u(32°)=272. */
+const toU = (h: number) => (((h - 120) % 360) + 360) % 360;
+const fromU = (u: number) => (u + 120) % 360;
+export const TEMP_HUE = { cold: 214, warm: 32 } as const;
+
+/** Оттенок на оси температуры: t = 0 — холодный, 0.5 — сиреневый, 1 — тёплый. */
+export function temperatureHue(t: number): number {
+  return fromU(lerp(toU(TEMP_HUE.cold), toU(TEMP_HUE.warm), clamp(t)));
+}
+
+/** Сдвиг оттенка к тёплому (32°) или холодному (214°) полюсу на долю amt — по оси температуры (не через зелёный).
+ *  У почти серых цветов оттенок — шум: сразу ставим целевой (насыщенность не меняется). */
 export function shiftTemperature(hex: string, towardWarm: boolean, amt: number): string {
   const [h, s, l] = hexToHsl(hex);
-  const target = towardWarm ? 32 : 214;
-  let d = target - h;
-  if (d > 180) d -= 360; if (d < -180) d += 360;
-  return hslToHex([h + d * clamp(amt), s, l]);
+  const target = towardWarm ? TEMP_HUE.warm : TEMP_HUE.cold;
+  if (s < 0.12) return hslToHex([target, s, l]);
+  return hslToHex([fromU(lerp(toU(h), toU(target), clamp(amt))), s, l]);
 }
 
 export function adjust(hex: string, { sat = 1, light = 0 }: { sat?: number; light?: number }): string {
