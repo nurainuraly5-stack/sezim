@@ -1,4 +1,7 @@
 // Минимальные WebGL-утилиты.
+
+/** Атрибуты контекста сцены дня — общие для MemoryScene и прогрева (components/gl-warmup.ts). */
+export const SCENE_CONTEXT: WebGLContextAttributes = { premultipliedAlpha: true, antialias: true };
 export function compile(gl: WebGLRenderingContext, vs: string, fs: string): WebGLProgram {
   const mk = (type: number, src: string) => {
     const s = gl.createShader(type)!;
@@ -12,6 +15,32 @@ export function compile(gl: WebGLRenderingContext, vs: string, fs: string): WebG
   gl.attachShader(p, mk(gl.FRAGMENT_SHADER, fs));
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || 'link');
+  return p;
+}
+
+/** Компиляция без блокировки главного потока: с KHR_parallel_shader_compile шейдеры собираются в GPU-процессе,
+ *  а мы только опрашиваем готовность раз в кадр. Без расширения — обычная синхронная компиляция. */
+export async function compileAsync(gl: WebGLRenderingContext, vs: string, fs: string): Promise<WebGLProgram> {
+  const ext = gl.getExtension('KHR_parallel_shader_compile') as { COMPLETION_STATUS_KHR: number } | null;
+  if (!ext) return compile(gl, vs, fs);
+  const mk = (type: number, src: string) => {
+    const s = gl.createShader(type)!;
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    return s;
+  };
+  const shaders = [mk(gl.VERTEX_SHADER, vs), mk(gl.FRAGMENT_SHADER, fs)];
+  const p = gl.createProgram()!;
+  shaders.forEach((s) => gl.attachShader(p, s));
+  gl.linkProgram(p);
+  while (!gl.getProgramParameter(p, ext.COMPLETION_STATUS_KHR)) {
+    if (gl.isContextLost()) throw new Error('context lost');
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    const log = shaders.map((s) => gl.getShaderInfoLog(s)).filter(Boolean).join('\n');
+    throw new Error(log || gl.getProgramInfoLog(p) || 'link');
+  }
   return p;
 }
 

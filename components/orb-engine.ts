@@ -1,6 +1,6 @@
 // Один WebGL-контекст на всё приложение: сфера рисуется во внеэкранный канвас и копируется
 // в 2D-канвас компонента. Так сфер на странице сколько угодно, а контекст браузера — один.
-import { compile, quad, uniforms } from '@/core/gl/gl';
+import { compile, compileAsync, quad, uniforms } from '@/core/gl/gl';
 import { orbFrag, VERT } from '@/core/gl/shaders';
 import type { OrbParams } from '@/core/orb';
 import { orbFrame } from '@/design/tokens';
@@ -121,6 +121,20 @@ export function drawOrb(ctx: CanvasRenderingContext2D, o: OrbParams, size: numbe
     console.error('orb render', err);
     return false;
   }
+}
+
+/** Прогрев: программа сферы компилируется без блокировки и кладётся в движок, затем один крошечный кадр
+ *  (ANGLE доделывает часть работы при первой отрисовке). Повторно ничего не делает. */
+export async function warmOrbEngine(o: OrbParams, lite = preferLite()) {
+  const e = getEngine();
+  if (!e) return;
+  const key = lite ? 'lite' : 'full';
+  if (!e.progs[key]) {
+    const prog = await compileAsync(e.gl, VERT, orbFrag(lite));
+    if (e.lost || engine !== e) return;
+    if (!e.progs[key]) e.progs[key] = { prog, u: uniforms(e.gl, prog) };
+  }
+  e.render(o, 8, STILL_TIME, {}, lite);
 }
 
 /** Статичный кадр (миниатюра) — момент «вдоха», полный шейдер. */

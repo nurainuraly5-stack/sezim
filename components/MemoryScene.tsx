@@ -2,12 +2,11 @@
 // Сцена воспоминания: один канвас, один шейдер. Техника → обработка и композиция; темп → ритм смены кадров.
 import { useEffect, useRef } from 'react';
 import type { StyleTokens, TechniqueId } from '@/core/types';
-import { compile, loadTexture, quad, uniforms } from '@/core/gl/gl';
+import { SCENE_CONTEXT, compileAsync, loadTexture, quad, uniforms } from '@/core/gl/gl';
 import { SCENE_FRAG, VERT } from '@/core/gl/shaders';
 import { hashString, hexToVec3 } from '@/core/color';
 
 const TECH_INDEX: Record<TechniqueId, number> = { softStrokes: 0, geometric: 1, filmNight: 2, ma: 3, collage: 4 };
-
 type Rect = { cx: number; cy: number; w: number; h: number; rot: number };
 
 /** Композиция — переменная часть. Способ встраивания (окно в тёмное пространство) — постоянный. */
@@ -51,11 +50,16 @@ export default function MemoryScene({ photos, tokens, id, intensity, onFail }: {
     const onRestored = () => { if (alive) setup(); };
     canvas.addEventListener('webglcontextlost', onLost);
     canvas.addEventListener('webglcontextrestored', onRestored);
-    const setup = () => {
-    const gl = canvas.getContext('webgl', { premultipliedAlpha: true, antialias: true });
+    const setup = async () => {
+    const gl = canvas.getContext('webgl', SCENE_CONTEXT);
     if (!gl) { onFail?.(); return; }
     let prog: WebGLProgram;
-    try { prog = compile(gl, VERT, SCENE_FRAG); } catch (e) { console.error('scene shader', e); onFail?.(); return; }
+    // асинхронно: тяжёлый шейдер сцены (Кувахара) не замораживает страницу; после прогрева в архиве — из кэша
+    try { prog = await compileAsync(gl, VERT, SCENE_FRAG); } catch (e) {
+      if (!alive || gl.isContextLost()) return;
+      console.error('scene shader', e); onFail?.(); return;
+    }
+    if (!alive) return;
     gl.useProgram(prog);
     quad(gl, prog);
     const u = uniforms(gl, prog);

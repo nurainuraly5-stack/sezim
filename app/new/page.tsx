@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import { useMedia, useWidth } from '@/components/useMedia';
 import { orbFrame, orbSize } from '@/design/tokens';
 import Orb from '@/components/Orb';
+import { warmShaders } from '@/components/gl-warmup';
 import { orbParams } from '@/core/orb';
 import WhyPanel from '@/components/WhyPanel';
 import { S } from '@/core/strings';
@@ -123,6 +124,9 @@ export default function NewDayPage() {
   if (!photos.length) missing.push(S.needPhoto);
   if (!hasSong) missing.push(S.needSong);
   const errors = [...(tried ? missing : []), ...(saveError ? [saveError] : [])];
+
+  // после создания откроется экран дня — его шейдеры собираем заранее, пока человек пишет
+  useEffect(() => { warmShaders(previewOrb); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function submit() {
     setTried(true);

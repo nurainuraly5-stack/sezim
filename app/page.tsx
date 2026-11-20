@@ -8,6 +8,8 @@ import DayFeed from '@/components/DayFeed';
 import OrbGrid from '@/components/OrbGrid';
 import { useOrbThumbs } from '@/components/useOrbThumbs';
 import { useMedia } from '@/components/useMedia';
+import { warmShaders } from '@/components/gl-warmup';
+import { orbParams, orbSource } from '@/core/orb';
 import { listDays } from '@/lib/db';
 import { seedIfEmpty } from '@/lib/seed';
 import { S, formatDate, formatMonth } from '@/core/strings';
@@ -51,6 +53,11 @@ export default function ArchivePage() {
       setDays(await listDays());
     })();
   }, []);
+
+  // пока смотрят архив — в фоне собираем шейдеры экрана дня, чтобы он открылся без паузы
+  useEffect(() => {
+    if (days?.length && !seeding) warmShaders(orbParams(orbSource(days[0])));
+  }, [days, seeding]);
 
   const all = useMemo(() => days ?? [], [days]);
   const months = useMemo(() => Array.from(new Set(all.map((d) => d.date.slice(0, 7)))), [all]);

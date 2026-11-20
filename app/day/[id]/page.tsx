@@ -6,6 +6,7 @@ import AppShell from '@/components/AppShell';
 import AtmosphereChart from '@/components/AtmosphereChart';
 import MemoryScene from '@/components/MemoryScene';
 import Orb from '@/components/Orb';
+import { warmOrbEngine } from '@/components/orb-engine';
 import SongPlayer from '@/components/SongPlayer';
 import WhyPanel from '@/components/WhyPanel';
 import { useMedia, useWidth } from '@/components/useMedia';
@@ -53,14 +54,16 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
   const [songPause, setSongPause] = useState(0);
   const player = useRef<DayPlayer | null>(null);
   const [orbColRef, orbCol] = useWidth(600);
-  // Первая компиляция шейдеров сцены занимает до 1,5 с главного потока — сначала даём отрисоваться
-  // тексту и карточкам, WebGL подключаем после первого кадра.
+  // Сначала отрисовываются текст и карточки, WebGL — после первого кадра. Программа сферы собирается
+  // асинхронно (после прогрева в архиве — мгновенно), иначе её синхронная компиляция замораживает страницу.
   const [glReady, setGlReady] = useState(false);
   useEffect(() => {
-    let t = 0;
-    const raf = requestAnimationFrame(() => { t = window.setTimeout(() => setGlReady(true), 0); });
-    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
-  }, []);
+    let off = false;
+    const raf = requestAnimationFrame(() => {
+      warmOrbEngine(params).catch(() => undefined).finally(() => { if (!off) setGlReady(true); });
+    });
+    return () => { off = true; cancelAnimationFrame(raf); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // «Слушать день» показываем, только если голос реально есть: сохранённый, серверный TTS или русский голос браузера
   useEffect(() => {
@@ -74,11 +77,11 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
   useEffect(() => () => player.current?.stop(), []);
 
   useEffect(() => {
-    if (!glFailed || !d.photos[0]) return;
+    if (!d.photos[0]) return;
     const u = URL.createObjectURL(d.photos[0]);
     setPhotoUrl(u);
     return () => URL.revokeObjectURL(u);
-  }, [glFailed, d.photos]);
+  }, [d.photos]);
 
   function stopListening() {
     // сначала отвязываем: stop() вызывает onVoiceState(false), который не должен прийти сюда повторно
@@ -175,11 +178,11 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
 
         <section className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
           <div className="card relative aspect-[4/3] overflow-hidden" style={{ background: '#0b0a12' }}>
-            {glFailed ? (
-              // без WebGL — фото как есть, честно без обработки
-              // eslint-disable-next-line @next/next/no-img-element
-              photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-            ) : glReady && (
+            {/* фото как есть: без WebGL — вместо сцены; пока шейдер сцены собирается — приглушённая подложка,
+                первый кадр сцены (непрозрачный фон) её закрывает */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ opacity: glFailed ? 1 : 0.35 }} />}
+            {!glFailed && glReady && (
               <MemoryScene photos={d.photos} tokens={d.tokens} id={d.id} intensity={1} onFail={() => setGlFailed(true)} />
             )}
           </div>
