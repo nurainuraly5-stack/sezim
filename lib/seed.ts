@@ -47,11 +47,16 @@ async function build(onProgress?: Progress) {
   for (let i = 0; i < n; i++) {
     const p = await prepared[i];
     if (!p) { failed++; continue; }
-    await createDay({
-      text: p.text, photos: p.photos, photoFeatures: p.photoFeatures, date: p.meta.date,
-      audio: linkAudio(p.remote?.songMeta ?? undefined, {}),
-      song: { kind: 'link', url: p.song.url },
-    }, { seed: true, createdAt: Date.parse(p.meta.date), remote: p.remote, authorTitle: p.meta.userTitleHint });
+    try {
+      await createDay({
+        text: p.text, photos: p.photos, photoFeatures: p.photoFeatures, date: p.meta.date,
+        audio: linkAudio(p.remote?.songMeta ?? undefined, {}),
+        song: { kind: 'link', url: p.song.url },
+      }, { seed: true, createdAt: Date.parse(p.meta.date), remote: p.remote, authorTitle: p.meta.userTitleHint });
+    } catch (e) {
+      console.warn('seed day not saved', SEED_DAYS[i].dir, e); // один день не сохранился — остальные всё равно появятся
+      failed++;
+    }
     await onProgress?.(i + 1, n);
   }
   if (!failed) writeFlag(); // не всё загрузилось — при следующем открытии демо-дни соберутся заново

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import type { DayEntry } from '@/core/types';
 import { orbParams, orbSource } from '@/core/orb';
 import { orbSize } from '@/design/tokens';
-import { db } from '@/lib/db';
+import { putThumb } from '@/lib/db';
 import { ORB_RENDER_VERSION, renderOrbBlob } from './orb-engine';
 
 export function useOrbThumbs(days: DayEntry[]) {
@@ -23,8 +23,9 @@ export function useOrbThumbs(days: DayEntry[]) {
         if (m[d.id]) continue;
         try {
           const blob = await renderOrbBlob(orbParams(orbSource(d)), orbSize.thumb);
-          await db.days.update(d.id, { thumb: blob, thumbV: ORB_RENDER_VERSION });
           add(d.id, blob);
+          // не сохранилась — не страшно: миниатюра всё равно показана, в следующий раз перерисуется
+          await putThumb(d.id, blob, ORB_RENDER_VERSION).catch((e) => console.warn('thumb save', e));
           if (!off) setUrls({ ...m });
         } catch (e) {
           console.warn('thumb', e); // без WebGL — компонент Orb покажет плоскую сферу
