@@ -1,7 +1,8 @@
 // A/B: тот же текст и те же фото, другая песня. Обе версии считаются заново одним и тем же движком
 // (buildMood → buildStyle → orbParams), поэтому всё различие между ними — от музыки. Чистые функции.
 import type { AudioFeatures, MoodProfile, PhotoFeatures, SongMeta, StyleTokens, TextFeatures } from './types';
-import { buildMood } from './mood';
+import { audioTrust, buildMood } from './mood';
+import { lerp } from './color';
 import { buildStyle, chooseTechnique, TECHNIQUES } from './style-engine';
 import { orbParams, type OrbParams } from './orb';
 
@@ -49,7 +50,9 @@ export function musicDiff(a: Variant, b: Variant): string[] {
   }
 
   // энергия → возбуждение, зерно, резкость
-  const ea = a.audio?.energy ?? a.mood.arousal, eb = b.audio?.energy ?? b.mood.arousal;
+  // энергия, которую движок реально использовал (оценка по названию подмешивается с весом доверия)
+  const used = (v: Variant) => (v.audio ? lerp(v.mood.arousal, v.audio.energy, audioTrust(v.audio)) : v.mood.arousal);
+  const ea = used(a), eb = used(b);
   out.push(`Энергия ${arrow(pct(ea), pct(eb))}: возбуждение дня ${arrow(pct(a.mood.arousal), pct(b.mood.arousal))}, зерно ${arrow(pct(a.tokens.grain), pct(b.tokens.grain))}, резкость ${arrow(pct(a.tokens.sharpness), pct(b.tokens.sharpness))}.`);
 
   // техника
@@ -60,7 +63,37 @@ export function musicDiff(a: Variant, b: Variant): string[] {
   }
 
   // честно о доверии к источнику
-  if (b.audio?.source === 'meta') out.push('Новая песня — по ссылке: темп и лад оценены по названию, движок учитывает их с весом 40% от анализа файла.');
+  if (b.audio?.source === 'meta') out.push(`Новая песня — по ссылке: темп и лад оценены по названию, движок учитывает их с весом ${pct(audioTrust(b.audio))} от анализа файла.`);
   else if (b.audio?.source === 'manual') out.push('Темп и лад новой песни заданы вручную, звук по ссылке не анализировался.');
+  return out.slice(0, 5);
+}
+
+/** 3–5 строк «что изменил текст»: те же фото и песня, другой текст — из реальных чисел двух версий. */
+export function textDiff(a: Variant, b: Variant): string[] {
+  const out: string[] = [];
+  const ma = a.mood, mb = b.mood;
+  out.push(`Настроение по тексту: светлость ${arrow(pct(ma.valence), pct(mb.valence))}, возбуждение ${arrow(pct(ma.arousal), pct(mb.arousal))}, плотность ${arrow(pct(ma.density), pct(mb.density))}.`);
+
+  if (a.tokens.technique !== b.tokens.technique) {
+    out.push(`Техника сменилась: ${TECHNIQUES[a.tokens.technique].name} → ${TECHNIQUES[b.tokens.technique].name} — ${b.techniqueWhy.slice(0, 2).join(', ')}.`);
+  } else {
+    out.push(`Техника осталась ${TECHNIQUES[b.tokens.technique].name}: текст поменял параметры внутри неё (мазок ${arrow(pct(a.tokens.brush), pct(b.tokens.brush))}, резкость ${arrow(pct(a.tokens.sharpness), pct(b.tokens.sharpness))}).`);
+  }
+
+  // что именно поменяло палитру тех же фото: температура текста или энергия дня (насыщенность)
+  const dw = mb.warmth - ma.warmth;
+  if (a.tokens.palette.join() === b.tokens.palette.join()) {
+    out.push(`Палитра та же: фото те же, а тепло и энергия текста почти не изменились (тепло дня ${pct(mb.warmth)}).`);
+  } else if (Math.abs(dw) >= 0.01) {
+    out.push(`Палитра тех же фото ${dw > 0 ? 'теплее' : 'холоднее'}: тепло дня ${arrow(pct(ma.warmth), pct(mb.warmth))} — снимки сдвинуты к температуре текста.`);
+  } else {
+    out.push(`Палитра тех же фото ${mb.arousal < ma.arousal ? 'приглушённее' : 'насыщеннее'}: насыщенность следует за энергией дня (возбуждение ${arrow(pct(ma.arousal), pct(mb.arousal))}); тепло то же (${pct(mb.warmth)}).`);
+  }
+
+  out.push(mb.contrast > 0.35
+    ? `Противоречие ${arrow(pct(ma.contrast), pct(mb.contrast))}: оболочка и ядро сферы разной температуры — смешанное состояние видно внутри неё.`
+    : `Противоречие ${arrow(pct(ma.contrast), pct(mb.contrast))}: сфера почти однородна.`);
+
+  out.push(`Сфера получила другой рисунок: её сид включает текст дня; темп и лад песни те же (${Math.round(mb.tempo)} BPM).`);
   return out.slice(0, 5);
 }

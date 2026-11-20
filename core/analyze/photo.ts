@@ -1,7 +1,7 @@
 // Анализ фото в браузере: ресайз ≤1600px, палитра (свой k-means, детерминированный),
 // яркость / контраст / насыщенность / температура.
 import type { PhotoFeatures } from '../types';
-import { clamp, rgbToHex, rgbToHsl, temperature, type RGB } from '../color';
+import { clamp, hexToHsl, hexToRgb, rgbToHex, rgbToHsl, temperature, type RGB } from '../color';
 
 const MAX_SIDE = 1600;
 
@@ -92,5 +92,34 @@ export async function analyzePhotos(blobs: Blob[]): Promise<PhotoFeatures | unde
   const palette = clusters.map(({ c, n: cnt }) => ({ hex: rgbToHex(c), weight: cnt / n }));
   const warmth = clamp(palette.reduce((acc, p) => acc + temperature(p.hex) * p.weight, 0));
 
-  return { palette, brightness, contrast, saturation, warmth, count: blobs.length };
+  // Акцент: яркие насыщенные пиксели (салют, гирлянда, свет рампы) теряются в кластерах по весу, если кадр в основном
+  // тёмный или серый. Если их ≥ 1% и похожего цвета среди пяти главных нет — акцент входит в пятёрку палитры.
+  const vivid = all.filter((p) => { const [, s, l] = rgbToHsl(p); return s >= 0.4 && l >= 0.2 && l <= 0.85; });
+  let accent: string | undefined;
+  if (vivid.length >= n * 0.01) {
+    // похожий — тот же оттенок и близкая светлота (тёмно-коричневое небо — не оранжевый салют)
+    const near = (c: RGB) => {
+      const [ah, , al] = rgbToHsl(c);
+      return palette.slice(0, 5).some((p) => {
+        const [h, s, l] = hexToHsl(p.hex);
+        return s >= 0.35 && Math.abs(l - al) < 0.12 && Math.min(Math.abs(h - ah), 360 - Math.abs(h - ah)) < 30;
+      });
+    };
+    const fresh = kmeans(vivid, 3).find((x) => x.n >= n * 0.005 && !near(x.c));
+    if (fresh) {
+      accent = rgbToHex(fresh.c);
+      // место акценту уступает самый избыточный из пяти главных (ближе всех к соседу), доминирующий остаётся первым
+      const top5 = palette.slice(0, 5).map((p) => hexToRgb(p.hex));
+      const dist = (x: RGB, y: RGB) => (x[0] - y[0]) ** 2 * 0.3 + (x[1] - y[1]) ** 2 * 0.59 + (x[2] - y[2]) ** 2 * 0.11;
+      let j = Math.min(4, palette.length), best = Infinity;
+      for (let i = 1; i < top5.length; i++) {
+        const d = Math.min(...top5.map((y, k) => (k === i ? Infinity : dist(top5[i], y))));
+        if (d < best) { best = d; j = i; }
+      }
+      const [moved] = palette.splice(j, 1, { hex: accent, weight: fresh.n / n });
+      if (moved) palette.push(moved);
+    }
+  }
+
+  return { palette, brightness, contrast, saturation, warmth, count: blobs.length, accent };
 }

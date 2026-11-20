@@ -247,8 +247,11 @@ vec3 shade(sampler2D t, vec2 texRes){
     float gx = lum(texture2D(t, uv+vec2(px.x,0.0)).rgb) - lum(texture2D(t, uv-vec2(px.x,0.0)).rgb);
     float gy = lum(texture2D(t, uv+vec2(0.0,px.y)).rgb) - lum(texture2D(t, uv-vec2(0.0,px.y)).rgb);
     float e = smoothstep(0.08, 0.22, length(vec2(gx, gy)) * (1.0 + u_sharp));
+    // контур контрастен месту: тёмный на светлом, светлый на тёмном (иначе искры салюта на ночном небе
+    // становятся чёрными линиями и пропадают)
+    vec3 ink = lum(c) > 0.35 ? u_pal[0]*0.6 : mix(u_pal[4], vec3(1.0), 0.45);
     c = mix(c, post, 0.55) * 1.15;
-    c = mix(c, u_pal[0]*0.6, e*0.75);
+    c = mix(c, ink, e*0.75);
   } else if (u_tech == 2) {
     // Film Grain Night: лифт теней, ореолы, тёплые блики
     vec3 hal = vec3(0.0);
@@ -270,7 +273,9 @@ vec3 shade(sampler2D t, vec2 texRes){
   c = mix(c, c + (c - blur) * 1.6, u_sharp * (u_tech == 0 ? 0.1 : 0.6));
   // дуотон в палитру дня
   vec3 duo = mix(u_pal[0], u_pal[4], smoothstep(0.03, 0.97, lum(c)));
-  c = mix(c, duo, u_duotone);
+  // если светлый конец палитры тёмный (ночной кадр), дуотон не гасит блики: огни и искры остаются светлыми
+  float keep = smoothstep(0.45, 0.85, lum(c)) * (1.0 - smoothstep(0.3, 0.6, lum(u_pal[4])));
+  c = mix(c, duo, u_duotone * (1.0 - keep));
   return c;
 }
 

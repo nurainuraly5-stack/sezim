@@ -6,15 +6,19 @@ import AppShell from '@/components/AppShell';
 import AtmosphereChart from '@/components/AtmosphereChart';
 import MemoryScene from '@/components/MemoryScene';
 import Orb from '@/components/Orb';
-import { warmOrbEngine } from '@/components/orb-engine';
 import SongPlayer from '@/components/SongPlayer';
 import WhyPanel from '@/components/WhyPanel';
 import { useMedia, useWidth } from '@/components/useMedia';
-import SongCompare from '@/components/SongCompare';
+import DayCompare, { type CompareKind } from '@/components/DayCompare';
+import TempoModeChips from '@/components/TempoModeChips';
+import { ORB_RENDER_VERSION, renderOrbBlob } from '@/components/orb-engine';
+import { computeVariant } from '@/core/ab';
+import { TEMPO_PRESETS, linkAudio, type ManualSong } from '@/core/analyze/song-link';
 import { deleteDay, getDay, listDays, putDay } from '@/lib/db';
 import { DayPlayer, loadBrowserVoices, pickRuVoice } from '@/lib/player';
-import { isTtsConfigured, renderVoice, voiceScript } from '@/lib/pipeline';
+import { dayTextFeatures, isTtsConfigured, renderVoice, voiceScript } from '@/lib/pipeline';
 import { download, exportDayZip, folderName } from '@/lib/zip';
+import { warmOrbEngine } from '@/components/orb-engine';
 import { orbParams, orbSource } from '@/core/orb';
 import { S, DAYPART_RU, formatDate, formatWeekday, audioModeRu, moodSummary } from '@/core/strings';
 import type { DayEntry } from '@/core/types';
@@ -118,12 +122,30 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
     if (p.voiceMode === 'none' && !hasMusic) stopListening();
   }
 
-  /** A/B: песни других дней — кандидаты для сравнения; блок открывается под сценой и прокручивается в вид. */
+  /** A/B: другие дни — источники песни или текста для сравнения; блок открывается под сценой и прокручивается в вид. */
   const [others, setOthers] = useState<DayEntry[] | null>(null);
-  async function openCompare() {
-    if (others) { document.getElementById('compare')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    setOthers(await listDays());
+  const [compareKind, setCompareKind] = useState<CompareKind>('song');
+  async function openCompare(kind: CompareKind) {
+    setCompareKind(kind);
+    if (!others) setOthers(await listDays());
     requestAnimationFrame(() => document.getElementById('compare')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+
+  /** Песня по ссылке: человек поправил темп/лад → день пересчитывается тем же движком и сохраняется
+   *  (название и цитата остаются). Звук по ссылке не анализируется — это ручной ввод, так и подписано. */
+  const a0 = d.song.analysis;
+  const manual: ManualSong = a0?.source === 'manual'
+    ? { bpm: TEMPO_PRESETS.some((t) => t.bpm === a0.bpm) ? a0.bpm : undefined, mode: a0.mode }
+    : {};
+  async function setManual(m: ManualSong) {
+    const audio = linkAudio(d.song.meta, m);
+    const tf = await dayTextFeatures(d);
+    const v = computeVariant({ text: d.text, createdAt: d.createdAt, textFeatures: tf, photo: d.photoFeatures }, audio, d.song.meta);
+    const next: DayEntry = { ...d, mood: v.mood, tokens: v.tokens, explain: v.explain, song: { ...d.song, analysis: audio } };
+    const thumb = await renderOrbBlob(orbParams(orbSource(next)), orbSize.thumb).catch(() => undefined);
+    const saved = { ...next, thumb, thumbV: thumb ? ORB_RENDER_VERSION : undefined };
+    await putDay(saved);
+    onChange(saved);
   }
 
   async function saveTitle() {
@@ -206,14 +228,22 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
             )}
             <div className="w-full max-w-sm">
               <SongPlayer day={d} pauseKey={songPause} onPlay={stopListening} />
+              {d.song.kind === 'link' && (
+                <div className="mt-3 flex flex-col gap-2 px-1">
+                  <p className="t-micro">{a0?.source === 'manual' ? S.linkSongManual : S.linkSongHint}</p>
+                  <TempoModeChips manual={manual} onChange={setManual} />
+                  {a0?.source === 'manual' && <button className="btn btn-quiet self-start min-h-[32px] px-3" onClick={() => setManual({})}>{S.linkSongReset}</button>}
+                </div>
+              )}
             </div>
-            <button className="btn w-full max-w-sm" onClick={openCompare} aria-expanded={!!others} aria-controls="compare">
-              {S.compare}
-            </button>
+            <div className="grid w-full max-w-sm grid-cols-1 gap-2">
+              <button className="btn" onClick={() => openCompare('song')} aria-expanded={!!others && compareKind === 'song'} aria-controls="compare">{S.compare}</button>
+              <button className="btn" onClick={() => openCompare('text')} aria-expanded={!!others && compareKind === 'text'} aria-controls="compare">{S.compareText}</button>
+            </div>
           </div>
         </section>
 
-        {others && <SongCompare day={d} others={others} mobile={mobile} onClose={() => setOthers(null)} />}
+        {others && <DayCompare day={d} others={others} mobile={mobile} kind={compareKind} onKind={setCompareKind} onClose={() => setOthers(null)} />}
 
         <section className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           <article className="card p-5">

@@ -41,6 +41,7 @@ export type PhotoFeatures = {
   brightness: number; contrast: number; saturation: number;
   warmth: number;        // 0 холодно .. 1 тепло
   count: number;
+  accent?: string;       // + яркий цвет меньшинства пикселей (салют, гирлянда), добавлен в палитру
 };
 
 /** Признаки текста — то, что возвращает /api/analyze или fallback. */

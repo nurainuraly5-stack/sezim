@@ -7,6 +7,7 @@ import {
   temperatureHue,
 } from './color';
 import { metaGenreGuess } from './analyze/song-link';
+import { audioTrust } from './mood';
 import { audioKeyRu, modeApprox } from './strings';
 
 export const TECHNIQUES: Record<TechniqueId, { name: string; ref: string }> = {
@@ -25,33 +26,57 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 const modeRu = (m: string) => (m === 'major' ? 'мажор' : m === 'minor' ? 'минор' : m === 'mixed' ? 'смешанный лад' : 'лад не определён');
 const fmt = (n: number) => n.toFixed(1).replace('.', ',');
 
-/** Условия включения техник — явные, со списком причин для «Почему». */
+/** Условия включения техник — явные. Причина попадает в «Почему», только если признак действительно тянет к технике
+ *  (порог в строке рядом), — никаких «спокойный день (возбуждение 60%)». */
 export function scoreTechniques({ mood, text, photo, audio }: EngineInput) {
   const dark = photo ? 1 - photo.brightness : mood.daypart === 'night' ? 0.7 : 0.4;
-  const nightish = mood.daypart === 'night' ? 1 : mood.daypart === 'dusk' ? 0.6 : 0;
+  // ночь/вечер — только из текста: если daypart выведен из тёмных фото, их темнота уже учтена в dark (не считаем дважды)
+  const nightish = text.daypart === 'night' ? 1 : text.daypart === 'dusk' ? 0.6 : 0;
   const fast = mood.tempo > 120 ? 1 : 0;
   const few = text.wordCount < 16 ? 1 : text.wordCount < 28 ? 0.4 : 0;
   const many = (photo?.count ?? 0) >= 4 ? 1 : 0;
+  const heavy = Math.max(0, 0.4 - mood.valence); // мягкий свет импрессионизма — не про тяжёлый день
+  const why = (...r: [boolean, string][]) => r.filter(([c]) => c).map(([, t]) => t);
   const s: Record<TechniqueId, { score: number; why: string[] }> = {
     softStrokes: {
-      score: (1 - mood.arousal) * 0.4 + mood.valence * 0.5 + mood.warmth * 0.4 + (mood.daypart !== 'night' ? 0.1 : 0),
-      why: [`спокойный день (возбуждение ${pct(mood.arousal)})`, `светлое настроение (${pct(mood.valence)})`, mood.warmth > 0.55 ? `тёплая температура (${pct(mood.warmth)})` : ''],
+      score: mood.valence * 0.55 + (1 - mood.arousal) * 0.3 + mood.warmth * 0.25 + (mood.daypart !== 'night' ? 0.1 : 0) - heavy,
+      why: why(
+        [mood.arousal < 0.45, `спокойный день (возбуждение ${pct(mood.arousal)})`],
+        [mood.valence >= 0.55, `светлое настроение (${pct(mood.valence)})`],
+        [mood.warmth > 0.55, `тёплая температура (${pct(mood.warmth)})`],
+      ),
     },
     geometric: {
-      score: mood.arousal * 0.75 + mood.density * 0.35 + fast * 0.2 + (audio?.energy ?? 0) * 0.15,
-      why: [`высокое возбуждение (${pct(mood.arousal)})`, `плотный текст (${pct(mood.density)})`, fast ? `быстрый темп ~${mood.tempo} BPM` : ''],
+      score: mood.arousal * 0.75 + mood.density * 0.35 + fast * 0.2 + (audio ? audio.energy * audioTrust(audio) : 0) * 0.15,
+      why: why(
+        [mood.arousal >= 0.55, `высокое возбуждение (${pct(mood.arousal)})`],
+        [mood.density >= 0.55, `плотный день (${pct(mood.density)})`],
+        [!!fast, `быстрый темп ~${mood.tempo} BPM`],
+      ),
     },
     filmNight: {
-      score: nightish * 0.55 + dark * 0.35 + (mood.mode === 'minor' ? 0.15 : 0) + (1 - mood.valence) * 0.15,
-      why: [nightish ? (mood.daypart === 'night' ? 'в тексте ночь' : 'в тексте вечер') : '', photo ? `тёмные фото (яркость ${pct(photo.brightness)})` : '', mood.mode === 'minor' ? 'минорный лад' : ''],
+      score: nightish * 0.55 + dark * 0.35 + (mood.mode === 'minor' ? 0.15 : 0) + (1 - mood.valence) * 0.35,
+      why: why(
+        [nightish > 0, text.daypart === 'night' ? 'в тексте ночь' : 'в тексте вечер'],
+        [!!photo && photo.brightness < 0.35, `тёмные фото (яркость ${pct(photo?.brightness ?? 0)})`],
+        [mood.mode === 'minor', 'минорный лад'],
+        [mood.valence < 0.4, `тяжёлый день (светлость ${pct(mood.valence)})`],
+      ),
     },
     ma: {
       score: (1 - mood.density) * 0.45 + few * 0.45 + (1 - mood.arousal) * 0.2 - (photo && photo.count > 2 ? 0.2 : 0),
-      why: [few >= 0.4 ? `мало слов (${text.wordCount})` : '', `разреженный день (плотность ${pct(mood.density)})`, mood.arousal < 0.4 ? 'тихий темп жизни' : ''],
+      why: why(
+        [few >= 0.4, `мало слов (${text.wordCount})`],
+        [mood.density < 0.45, `разреженный день (плотность ${pct(mood.density)})`],
+        [mood.arousal < 0.4, 'тихий темп жизни'],
+      ),
     },
     collage: {
       score: many * 0.55 + mood.density * 0.45 + Math.min((photo?.count ?? 0) / 8, 0.3),
-      why: [photo ? `${photo.count} фото` : '', `высокая плотность событий (${pct(mood.density)})`],
+      why: why(
+        [(photo?.count ?? 0) >= 3, `${photo?.count} фото`],
+        [mood.density >= 0.55, `много событий (плотность ${pct(mood.density)})`],
+      ),
     },
   };
   return s;
@@ -61,7 +86,9 @@ export function chooseTechnique(input: EngineInput): { id: TechniqueId; why: str
   const s = scoreTechniques(input);
   let best: TechniqueId = 'softStrokes';
   for (const k of Object.keys(s) as TechniqueId[]) if (s[k].score > s[best].score) best = k;
-  return { id: best, why: s[best].why.filter(Boolean) };
+  // ни один признак не выражен сильно — честно говорим, что техника выиграла по сумме
+  const m = input.mood;
+  return { id: best, why: s[best].why.length ? s[best].why : [`ровный день без выраженного признака: светлость ${pct(m.valence)}, возбуждение ${pct(m.arousal)}, тепло ${pct(m.warmth)}`] };
 }
 
 /** Палитра без фото: непрерывная ось температуры (холод → сирень → тепло, в обход зелёного), а не словарь эмоций. */
@@ -89,8 +116,9 @@ function closestByTemp(cands: string[], t: number) {
 export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: string[] } {
   const { mood, text, photo, audio, meta } = input;
   const technique = chooseTechnique(input);
-  const energy = audio?.energy ?? mood.arousal;
-  const conf = audio ? (audio.source === 'meta' ? 0.4 : 1) : 0;
+  const conf = audioTrust(audio);
+  // энергия звука — по доверию к нему: анализ файла задаёт её сам, оценка по названию лишь подмешивается к возбуждению дня
+  const energy = audio ? lerp(mood.arousal, audio.energy, conf) : mood.arousal;
 
   // 1. Базовая палитра
   let base = photo ? photo.palette.slice(0, 5).map((p) => p.hex) : syntheticPalette(mood);
@@ -98,8 +126,13 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
 
   // 2. Музыка трансформирует: лад → тёплая/холодная доля, энергия → насыщенность, яркость звука → светлота
   const modeShift = audio && audio.mode !== 'unknown' ? 0.22 * conf * (audio.modeConfidence ?? 1) : 0;
+  // текст: день теплее или холоднее снимка → палитра фото сдвигается к температуре дня (тот же текст + другое фото
+  // и то же фото + другой текст дают разные палитры); сдвиг ограничен, цвета фото остаются узнаваемыми
+  const textGap = photo ? mood.warmth - photo.warmth : 0;
+  const textShift = Math.abs(textGap) > 0.055 ? Math.min(0.3, Math.abs(textGap) * 0.9) : 0;
   base = base.map((c, i) => {
-    let x = modeShift ? shiftTemperature(c, audio!.mode === 'major', modeShift * (i % 2 ? 1 : 0.6)) : c;
+    let x = textShift ? shiftTemperature(c, textGap > 0, textShift * (i % 2 ? 0.6 : 1)) : c;
+    x = modeShift ? shiftTemperature(x, audio!.mode === 'major', modeShift * (i % 2 ? 1 : 0.6)) : x;
     x = adjust(x, { sat: 0.7 + energy * 0.6, light: ((audio?.brightness ?? 0.5) - 0.5) * 0.12 * conf });
     return x;
   });
@@ -137,6 +170,10 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
   };
   core = layer(core, innerT, 0.5);
   rim = layer(rim, outerT, 0.38);
+  // энергичный день: ядро — самый яркий цвет снимков (салют, свет рампы), а не середина оси температуры —
+  // иначе шумный и тяжёлый дни с одинаковым теплом получают одинаково сиреневые сферы
+  const vividCore = !!photo?.accent && mood.arousal >= 0.6;
+  if (vividCore) core = layer(adjust(photo!.accent!, { sat: 1.15, light: 0.1 }), temperature(photo!.accent!), 0.45);
 
   // 4. Числовые токены
   const year = meta?.year;
@@ -164,7 +201,7 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
   if (audio?.source === 'audio') {
     explain.push(`Песня: ~${audio.bpm} BPM, ${modeApprox(audio) ? `${modeRu(audio.mode)} приблизительно (${audioKeyRu(audio)}) — его вклад в палитру ослаблен` : `${modeRu(audio.mode)}${audio.key ? ` (${audio.key})` : ''}`} — анализ файла → сфера делает вдох раз в ${fmt(1 / breath)} с, кадры меняются каждые ${fmt(rhythm)} с.`);
   } else if (audio?.source === 'meta') {
-    explain.push(`Песня по ссылке: темп ~${audio.bpm} и ${modeRu(audio.mode)} — оценка по названию${genre ? ` и жанру (${genre})` : ''}, не анализ аудио → ритм кадров ${fmt(rhythm)} с.`);
+    explain.push(`Песня по ссылке: темп ~${audio.bpm} и ${modeRu(audio.mode)} — приблизительная оценка по метаданным${genre ? ` (жанр: ${genre})` : ', жанр не распознан'}, не анализ аудио; учтена с весом ${pct(conf)} → ритм кадров ${fmt(rhythm)} с.`);
   } else if (audio?.source === 'manual') {
     explain.push(`Темп ${audio.bpm} BPM и ${modeRu(audio.mode)} заданы вручную → ритм кадров ${fmt(rhythm)} с.`);
   } else {
@@ -172,16 +209,21 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
   }
   if (photo) {
     const dom = photo.palette[0];
-    explain.push(`Палитра — из ${photo.count} фото (доминирует ${dom.hex}, ${pct(dom.weight)})${modeShift ? `; ${audio!.mode === 'major' ? 'мажор сдвинул её в тепло' : 'минор охладил её'}` : ''}.`);
+    const notes = [
+      photo.accent ? `акцент ${photo.accent}` : '',
+      textShift ? `текст ${textGap > 0 ? 'теплее' : 'холоднее'} снимков (тепло дня ${pct(mood.warmth)}, фото ${pct(photo.warmth)}) — палитра ${textGap > 0 ? 'согрета' : 'охлаждена'}` : '',
+      modeShift ? (audio!.mode === 'major' ? 'мажор сдвинул её в тепло' : 'минор охладил её') : '',
+    ].filter(Boolean);
+    explain.push(`Палитра — из ${photo.count} фото (доминирует ${dom.hex}, ${pct(dom.weight)})${notes.length ? '; ' + notes.join('; ') : ''}.`);
   } else {
     explain.push(`Фото нет — палитра построена по оси температуры текста (${pct(mood.warmth)} тепла)${modeShift ? ` и ${audio!.mode === 'major' ? 'согрета мажором' : 'охлаждена минором'}` : ''}.`);
   }
   if (mood.contrast > 0.35) {
     const outer = text.coldMotifs[0] ? `«${text.coldMotifs[0]}»` : photo ? 'фото' : 'текст';
     const inner = text.warmMotifs[0] ? `«${text.warmMotifs[0]}»` : 'настроение';
-    explain.push(`Смешанное состояние (${pct(mood.contrast)}): холодная оболочка — ${outer}, тёплое ядро — ${inner}.`);
+    explain.push(`Смешанное состояние (${pct(mood.contrast)}): холодная оболочка — ${outer}, ${vividCore ? `ядро — яркий цвет снимков ${photo!.accent} (энергичный день, возбуждение ${pct(mood.arousal)})` : `тёплое ядро — ${inner}`}.`);
   } else {
-    explain.push(`Сфера почти однородна: противоречий в дне мало (${pct(mood.contrast)}).`);
+    explain.push(`Сфера почти однородна: противоречий в дне мало (${pct(mood.contrast)})${vividCore ? `; ядро — яркий цвет снимков ${photo!.accent}: энергичный день (возбуждение ${pct(mood.arousal)})` : ''}.`);
   }
   explain.push(`Энергия ${pct(energy)} → зерно ${pct(grain)}, резкость ${pct(sharpness)}${old ? `, плёночная фактура эпохи (${year})` : ''}.`);
 

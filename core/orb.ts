@@ -3,7 +3,7 @@
 // цвета — из палитры дня (фото + музыка, см. style-engine), всё остальное — непрерывные функции признаков.
 import type { AudioFeatures, DayEntry, MoodProfile, PhotoFeatures, SongMeta, StyleTokens } from './types';
 import { clamp, hexToHsl, hexToRgb, hslToHex, lerp, luminance } from './color';
-import { tempoNorm } from './mood';
+import { audioTrust, tempoNorm } from './mood';
 
 /** Всё, из чего строится сфера. DayEntry подходит напрямую (см. orbSource). */
 export type OrbSource = {
@@ -125,7 +125,7 @@ export function orbParams(s: OrbSource): OrbParams {
   const night = mood.daypart === 'night' ? 1 : mood.daypart === 'dusk' ? 0.45 : 0;
   const minor = mood.mode === 'minor' ? 1 : mood.mode === 'mixed' ? 0.5 : 0;
   const photoDark = photo ? 1 - photo.brightness : 0.4;
-  const energy = audio && audio.source !== 'meta' ? audio.energy : lerp(mood.arousal, audio?.energy ?? mood.arousal, 0.4);
+  const energy = audio ? lerp(mood.arousal, audio.energy, audioTrust(audio)) : mood.arousal; // как в style-engine
 
   // Тяжесть/темнота сферы: непрерывная функция настроения, времени суток, лада и света фото
   const depth = clamp(((1 - mood.valence) - 0.3) * 1.15 + night * 0.28 + minor * 0.12 + (photoDark - 0.5) * 0.3);

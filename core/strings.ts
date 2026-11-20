@@ -23,7 +23,10 @@ export const S = {
   playSong: 'Слушать песню',
   pauseSong: 'Пауза',
   songOfDay: 'Песня дня',
-  metaEstimate: 'вид рассчитан по названию песни, не по звуку',
+  metaEstimate: 'приблизительная оценка по метаданным: звук по ссылке не анализируется',
+  linkSongHint: 'Знаешь песню? Поправь темп и лад — день пересчитается.',
+  linkSongManual: 'Темп и лад заданы вручную, звук по ссылке не анализировался.',
+  linkSongReset: 'Вернуть оценку',
   pickDay: 'Выбери сферу, чтобы посмотреть день.',
   viewOrbs: 'Сферы',
   viewFeed: 'Лента',
@@ -39,6 +42,22 @@ export const S = {
   photosCount: (n: number) => `${n} фото`,
   // A/B: другая песня
   compare: 'Сравнить с другой песней',
+  compareText: 'Сравнить с другим текстом',
+  compareKindSong: 'Другая песня',
+  compareKindText: 'Другой текст',
+  compareTitleText: 'Те же фото и песня, другой текст',
+  compareSubText: 'Фото и песня те же. Обе версии посчитаны заново одним движком — всё различие от текста.',
+  pickOtherText: 'Текст другого дня',
+  pickOwnText: 'Свой текст',
+  ownTextPlaceholder: 'Перепиши день по-другому — например, тот же вечер, но грустный.',
+  recalc: 'Пересчитать',
+  recalcBusy: 'Считаем…',
+  thisText: 'A · текст этого дня',
+  otherText: 'B · другой текст',
+  whatTextChanged: 'Что изменил текст',
+  chooseText: 'Выбери текст для сравнения.',
+  rowMood: 'Светлость / возбуждение',
+  rowWarm: 'Тепло / противоречие',
   compareTitle: 'Та же запись, другая песня',
   compareSub: 'Текст и фото те же. Обе версии посчитаны заново одним движком — всё различие от музыки.',
   compareClose: 'Закрыть сравнение',
@@ -116,7 +135,7 @@ export const S = {
 
 /** Короткое описание дня по непрерывным осям MoodProfile (пороги, а не словарь эмоций). */
 export function moodSummary(m: { valence: number; arousal: number; warmth: number; contrast: number }): string {
-  const temp = m.contrast >= 0.35 ? 'смешанный' : m.warmth >= 0.6 ? 'тёплый' : m.warmth <= 0.4 ? 'прохладный' : 'ровный';
+  const temp = m.contrast >= 0.35 ? 'смешанный' : m.warmth >= 0.6 ? 'тёплый' : m.warmth <= 0.4 ? 'прохладный' : 'нейтральный';
   const pace = m.arousal >= 0.6 ? 'насыщенный' : m.arousal <= 0.35 ? 'спокойный' : 'размеренный';
   const light = m.valence <= 0.38 ? 'тяжёлый' : m.valence >= 0.62 ? 'светлый' : '';
   return [temp, pace, light].filter(Boolean).join(', ');

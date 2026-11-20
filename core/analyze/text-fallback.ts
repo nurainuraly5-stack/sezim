@@ -55,6 +55,10 @@ function wordsWith(text: string, stems: string[]): string[] {
 
 const uniq = (a: string[]) => Array.from(new Set(a));
 
+// Не детали дня: дата («8 ноября» — не холод) и обращение к дневнику («Дорогой дневник» — не дорога).
+const NOT_DETAIL = /\d+\s*(январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-яё]*|дорог(ой|ая|ие)\s+дневник[а-яё]*/gi;
+const stripNonDetails = (text: string) => text.replace(NOT_DETAIL, ' ');
+
 export function splitSentences(text: string): string[] {
   return text.replace(/\s+/g, ' ').split(/(?<=[.!?…])\s+|\n+/).map((s) => s.trim()).filter((s) => s.length > 1);
 }
@@ -82,7 +86,8 @@ const NOT_ADJ = new Set(['какой', 'такой', 'другой', 'мой', '
 const FUNC = new Set(['и', 'а', 'но', 'в', 'во', 'на', 'с', 'со', 'к', 'ко', 'по', 'за', 'из', 'от', 'до', 'у', 'о', 'об', 'для', 'при', 'под',
   'над', 'про', 'что', 'как', 'так', 'же', 'ли', 'бы', 'не', 'ни', 'было', 'был', 'была', 'были', 'это', 'то', 'всё', 'все', 'еще', 'ещё', 'уже']);
 // срезаем в начале только союзы и вводные слова — предлоги («в голове шум») остаются
-const LEAD = new Set([...STOP, 'и', 'а', 'но', 'да', 'зато', 'однако', 'хотя', 'вот', 'ну', 'тогда', 'затем', 'наконец', 'ещё', 'еще', 'уже']);
+const LEAD = new Set([...STOP, 'и', 'а', 'но', 'да', 'зато', 'однако', 'хотя', 'вот', 'ну', 'тогда', 'затем', 'наконец', 'ещё', 'еще', 'уже',
+  'что', 'ведь', 'чтобы', 'если', 'пока']);
 const DETAIL = [...LEX.sensory, ...LEX.warm, ...LEX.cold];
 const wc = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const hasStem = (s: string, stems: string[]) => countHits(norm(s), stems) > 0;
@@ -142,7 +147,8 @@ export function fallbackTitle(text: string, contrast = 0): string {
 }
 
 export function analyzeTextFallback(text: string): TextFeatures {
-  const tn = norm(text);
+  const detail = stripNonDetails(text); // для маркеров и деталей; название и цитата — из исходного текста
+  const tn = norm(detail);
   const words = text.split(/\s+/).filter(Boolean);
   const wordCount = words.length;
   const sentences = splitSentences(text);
@@ -171,9 +177,9 @@ export function analyzeTextFallback(text: string): TextFeatures {
   let daypart: TextFeatures['daypart'] = 'unknown'; let best = 0;
   for (const [k, v] of dp) if (v > 0 && v >= best) { daypart = k; best = v; }
 
-  const warmMotifs = uniq(wordsWith(text, LEX.warm)).slice(0, 4);
-  const coldMotifs = uniq(wordsWith(text, LEX.cold)).slice(0, 4);
-  let motifs = uniq([...wordsWith(text, LEX.sensory), ...warmMotifs, ...coldMotifs]).slice(0, 6);
+  const warmMotifs = uniq(wordsWith(detail, LEX.warm)).slice(0, 4);
+  const coldMotifs = uniq(wordsWith(detail, LEX.cold)).slice(0, 4);
+  let motifs = uniq([...wordsWith(detail, LEX.sensory), ...warmMotifs, ...coldMotifs]).slice(0, 6);
   if (motifs.length < 3) {
     const extra = uniq(words.map((w) => norm(clean(w))).filter((w) => w.length > 5 && !STOP.has(w)))
       .sort((a, b) => b.length - a.length);

@@ -11,7 +11,8 @@ import WhyPanel from '@/components/WhyPanel';
 import { S, audioKeyRu, audioModeRu } from '@/core/strings';
 import { analyzePhotos, resizePhoto } from '@/core/analyze/photo';
 import { analyzeAudioFile } from '@/core/analyze/audio';
-import { TEMPO_PRESETS, linkAudio, parseSongLink, type ManualSong } from '@/core/analyze/song-link';
+import { linkAudio, parseSongLink, type ManualSong } from '@/core/analyze/song-link';
+import TempoModeChips from '@/components/TempoModeChips';
 import type { AudioFeatures, PhotoFeatures, SongMeta } from '@/core/types';
 import { analyzeRemote, createDay, previewStyle } from '@/lib/pipeline';
 
@@ -226,20 +227,7 @@ export default function NewDayPage() {
                 {link && (
                   <div className="flex flex-col gap-3 rounded-[var(--r-md)] border border-line p-4">
                     <p className="t-caption">Звук по ссылке не анализируется: темп и лад {audio?.source === 'manual' ? 'заданы тобой' : 'оценены по названию'}. Можно поправить.</p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="t-caption w-14">{S.tempo}</span>
-                      {TEMPO_PRESETS.map((t) => (
-                        <button key={t.bpm} type="button" className="chip" aria-pressed={manual.bpm === t.bpm}
-                          onClick={() => setManual((m) => ({ ...m, bpm: m.bpm === t.bpm ? undefined : t.bpm }))}>{t.label}</button>
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="t-caption w-14">{S.mode}</span>
-                      {(['major', 'minor', 'unknown'] as const).map((m) => (
-                        <button key={m} type="button" className="chip" aria-pressed={manual.mode === m}
-                          onClick={() => setManual((x) => ({ ...x, mode: x.mode === m ? undefined : m }))}>{S[m]}</button>
-                      ))}
-                    </div>
+                    <TempoModeChips manual={manual} onChange={setManual} />
                   </div>
                 )}
               </>

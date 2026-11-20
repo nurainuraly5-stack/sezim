@@ -11,8 +11,13 @@ const wavg = (...xs: W[]) => {
 
 export const tempoNorm = (bpm: number) => clamp((bpm - 60) / 120);
 
+/** Доверие к признакам песни: анализ файла и ручной ввод — 1; оценка по метаданным — до 0,4 и пропорционально её
+ *  уверенности (жанр не распознан → почти ничего не знаем → почти не влияет, а не тянет день к «средним» 104 BPM). */
+export const audioTrust = (audio?: AudioFeatures) =>
+  !audio ? 0 : audio.source === 'meta' ? 0.4 * clamp(audio.confidence / 0.3) : 1;
+
 export function buildMood(text: TextFeatures, photo?: PhotoFeatures, audio?: AudioFeatures): MoodProfile {
-  const aw = audio ? (audio.source === 'meta' ? 0.4 : 1) : 0; // оценке по метаданным доверяем меньше
+  const aw = audioTrust(audio);
   const modeVal = audio?.mode === 'major' ? 0.75 : audio?.mode === 'minor' ? 0.28 : 0.5;
   const modeWarm = audio?.mode === 'major' ? 0.66 : audio?.mode === 'minor' ? 0.34 : 0.5;
   // неуверенный лад (поп-петли, где мажор и параллельный минор звучат одинаково) влияет слабее
