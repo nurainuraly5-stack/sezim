@@ -64,6 +64,19 @@ export function mergeText(fallback: TextFeatures, llm: AnalyzeResponse['llm']): 
   };
 }
 
+/** Признаки текста сохранённого дня (для A/B): упрощённый анализ детерминирован, LLM-ответ берётся из кэша
+ *  (без сети); название и цитата — как у дня. engine говорит, что реально использовано. */
+export async function dayTextFeatures(d: DayEntry): Promise<TextFeatures> {
+  const fallback = analyzeTextFallback(d.text);
+  let tf = fallback;
+  if (d.analysisEngine === 'llm') {
+    const songUrl = d.song.kind === 'link' ? d.song.url : undefined;
+    const cached = await cacheGet<AnalyzeResponse>('analyze:' + hashString(d.text + '|' + (songUrl || '')));
+    tf = mergeText(fallback, cached?.llm ?? null);
+  }
+  return { ...tf, title: d.mood.title, quote: d.mood.quote };
+}
+
 /** Предрендер озвучки; null → в просмотре используется голос браузера. */
 export async function renderVoice(script: string, pace: 'slow' | 'mid' | 'fast', warmth: number): Promise<Blob | undefined> {
   try {

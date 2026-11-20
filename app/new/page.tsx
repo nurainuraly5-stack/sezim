@@ -11,7 +11,7 @@ import WhyPanel from '@/components/WhyPanel';
 import { S } from '@/core/strings';
 import { analyzePhotos, resizePhoto } from '@/core/analyze/photo';
 import { analyzeAudioFile } from '@/core/analyze/audio';
-import { estimateFromMeta, parseSongLink } from '@/core/analyze/song-link';
+import { TEMPO_PRESETS, linkAudio, parseSongLink, type ManualSong } from '@/core/analyze/song-link';
 import type { AudioFeatures, PhotoFeatures, SongMeta } from '@/core/types';
 import { analyzeRemote, createDay, previewStyle } from '@/lib/pipeline';
 
@@ -26,7 +26,6 @@ function useDebounced<T>(v: T, ms: number) {
   return d;
 }
 
-const TEMPOS = [{ label: 'медленно', bpm: 76 }, { label: 'средне', bpm: 104 }, { label: 'быстро', bpm: 134 }];
 
 export default function NewDayPage() {
   const router = useRouter();
@@ -46,7 +45,7 @@ export default function NewDayPage() {
   const [meta, setMeta] = useState<SongMeta>({});
   const [fileAudio, setFileAudio] = useState<AudioFeatures>();
   const [audioBusy, setAudioBusy] = useState(false);
-  const [manual, setManual] = useState<{ bpm?: number; mode?: 'major' | 'minor' | 'unknown' }>({});
+  const [manual, setManual] = useState<ManualSong>({});
 
   // ошибки показываем после первой попытки и пересчитываем на лету: заполнил поле — строка исчезла
   const [tried, setTried] = useState(false);
@@ -104,11 +103,7 @@ export default function NewDayPage() {
   const audio: AudioFeatures | undefined = useMemo(() => {
     if (songKind === 'file') return file ? fileAudio : undefined;
     if (!link) return undefined;
-    const est = estimateFromMeta(meta);
-    if (manual.bpm || manual.mode) {
-      return { ...est, source: 'manual', bpm: manual.bpm ?? est.bpm, mode: manual.mode ?? est.mode, confidence: 0.5 };
-    }
-    return est;
+    return linkAudio(meta, manual);
   }, [songKind, file, fileAudio, link, meta, manual]);
 
   // --- живое превью
@@ -233,7 +228,7 @@ export default function NewDayPage() {
                     <p className="t-caption">Звук по ссылке не анализируется: темп и лад {audio?.source === 'manual' ? 'заданы тобой' : 'оценены по названию'}. Можно поправить.</p>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="t-caption w-14">{S.tempo}</span>
-                      {TEMPOS.map((t) => (
+                      {TEMPO_PRESETS.map((t) => (
                         <button key={t.bpm} type="button" className="chip" aria-pressed={manual.bpm === t.bpm}
                           onClick={() => setManual((m) => ({ ...m, bpm: m.bpm === t.bpm ? undefined : t.bpm }))}>{t.label}</button>
                       ))}

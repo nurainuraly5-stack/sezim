@@ -10,7 +10,8 @@ import { warmOrbEngine } from '@/components/orb-engine';
 import SongPlayer from '@/components/SongPlayer';
 import WhyPanel from '@/components/WhyPanel';
 import { useMedia, useWidth } from '@/components/useMedia';
-import { deleteDay, getDay, putDay } from '@/lib/db';
+import SongCompare from '@/components/SongCompare';
+import { deleteDay, getDay, listDays, putDay } from '@/lib/db';
 import { DayPlayer, loadBrowserVoices, pickRuVoice } from '@/lib/player';
 import { isTtsConfigured, renderVoice, voiceScript } from '@/lib/pipeline';
 import { download, exportDayZip, folderName } from '@/lib/zip';
@@ -117,6 +118,14 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
     if (p.voiceMode === 'none' && !hasMusic) stopListening();
   }
 
+  /** A/B: песни других дней — кандидаты для сравнения; блок открывается под сценой и прокручивается в вид. */
+  const [others, setOthers] = useState<DayEntry[] | null>(null);
+  async function openCompare() {
+    if (others) { document.getElementById('compare')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    setOthers(await listDays());
+    requestAnimationFrame(() => document.getElementById('compare')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+
   async function saveTitle() {
     const t = title.trim().replace(/\s+/g, ' ');
     setEditing(false);
@@ -198,8 +207,13 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
             <div className="w-full max-w-sm">
               <SongPlayer day={d} pauseKey={songPause} onPlay={stopListening} />
             </div>
+            <button className="btn w-full max-w-sm" onClick={openCompare} aria-expanded={!!others} aria-controls="compare">
+              {S.compare}
+            </button>
           </div>
         </section>
+
+        {others && <SongCompare day={d} others={others} mobile={mobile} onClose={() => setOthers(null)} />}
 
         <section className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           <article className="card p-5">

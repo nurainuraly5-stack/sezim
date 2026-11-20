@@ -49,6 +49,17 @@ export function estimateFromMeta(meta: SongMeta | undefined): AudioFeatures {
   };
 }
 
+/** Ручные пресеты темпа для песни по ссылке (звук по ссылке не анализируется). */
+export const TEMPO_PRESETS = [{ label: 'медленно', bpm: 76 }, { label: 'средне', bpm: 104 }, { label: 'быстро', bpm: 134 }] as const;
+export type ManualSong = { bpm?: number; mode?: 'major' | 'minor' | 'unknown' };
+
+/** Признаки песни по ссылке: оценка по метаданным; если человек задал темп/лад — source: 'manual'. */
+export function linkAudio(meta: SongMeta | undefined, manual: ManualSong): AudioFeatures {
+  const est = estimateFromMeta(meta);
+  if (!manual.bpm && !manual.mode) return est;
+  return { ...est, source: 'manual', bpm: manual.bpm ?? est.bpm, mode: manual.mode ?? est.mode, confidence: 0.5 };
+}
+
 export function metaGenreGuess(meta: SongMeta | undefined): string | undefined {
   const hay = [meta?.title, meta?.artist, meta?.genre].filter(Boolean).join(' ');
   return RULES.find((r) => r.re.test(hay))?.genre;

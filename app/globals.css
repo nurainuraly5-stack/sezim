@@ -127,6 +127,10 @@ button.chip:hover { border-color: color-mix(in srgb, var(--ink) 30%, transparent
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
+/* Метка ритма кадров в A/B: вспыхивает с периодом смены кадров сцены (--beat задаёт компонент) */
+.beat { animation: beat var(--beat, 4s) ease-out infinite; }
+@keyframes beat { 0% { transform: scale(1); opacity: 1; } 25% { transform: scale(0.55); opacity: 0.35; } 100% { transform: scale(1); opacity: 1; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
