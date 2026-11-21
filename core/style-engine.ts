@@ -25,70 +25,104 @@ export type EngineInput = {
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const modeRu = (m: string) => (m === 'major' ? 'мажор' : m === 'minor' ? 'минор' : m === 'mixed' ? 'смешанный лад' : 'лад не определён');
 const fmt = (n: number) => n.toFixed(1).replace('.', ',');
+const fmt2 = (n: number) => n.toFixed(2).replace('.', ',');
+/** 1 слово, 2 слова, 5 слов */
+const words = (n: number) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'слово' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'слова' : 'слов'}`;
 
-/** Условия включения техник — явные. Причина попадает в «Почему», только если признак действительно тянет к технике
- *  (порог в строке рядом), — никаких «спокойный день (возбуждение 60%)». */
-export function scoreTechniques({ mood, text, photo, audio }: EngineInput) {
-  const dark = photo ? 1 - photo.brightness : mood.daypart === 'night' ? 0.7 : 0.4;
-  // ночь/вечер — только из текста: если daypart выведен из тёмных фото, их темнота уже учтена в dark (не считаем дважды)
-  const nightish = text.daypart === 'night' ? 1 : text.daypart === 'dusk' ? 0.6 : 0;
-  const fast = mood.tempo > 120 ? 1 : 0;
-  const few = text.wordCount < 16 ? 1 : text.wordCount < 28 ? 0.4 : 0;
-  const many = (photo?.count ?? 0) >= 4 ? 1 : 0;
-  const heavy = Math.max(0, 0.4 - mood.valence); // мягкий свет импрессионизма — не про тяжёлый день
-  const why = (...r: [boolean, string][]) => r.filter(([c]) => c).map(([, t]) => t);
-  const s: Record<TechniqueId, { score: number; why: string[] }> = {
-    softStrokes: {
-      score: mood.valence * 0.55 + (1 - mood.arousal) * 0.3 + mood.warmth * 0.25 + (mood.daypart !== 'night' ? 0.1 : 0) - heavy,
-      why: why(
-        [mood.arousal < 0.45, `спокойный день (возбуждение ${pct(mood.arousal)})`],
-        [mood.valence >= 0.55, `светлое настроение (${pct(mood.valence)})`],
-        [mood.warmth > 0.55, `тёплая температура (${pct(mood.warmth)})`],
-      ),
-    },
-    geometric: {
-      score: mood.arousal * 0.75 + mood.density * 0.35 + fast * 0.2 + (audio ? audio.energy * audioTrust(audio) : 0) * 0.15,
-      why: why(
-        [mood.arousal >= 0.55, `высокое возбуждение (${pct(mood.arousal)})`],
-        [mood.density >= 0.55, `плотный день (${pct(mood.density)})`],
-        [!!fast, `быстрый темп ~${mood.tempo} BPM`],
-      ),
-    },
-    filmNight: {
-      score: nightish * 0.55 + dark * 0.35 + (mood.mode === 'minor' ? 0.15 : 0) + (1 - mood.valence) * 0.35,
-      why: why(
-        [nightish > 0, text.daypart === 'night' ? 'в тексте ночь' : 'в тексте вечер'],
-        [!!photo && photo.brightness < 0.35, `тёмные фото (яркость ${pct(photo?.brightness ?? 0)})`],
-        [mood.mode === 'minor', 'минорный лад'],
-        [mood.valence < 0.4, `тяжёлый день (светлость ${pct(mood.valence)})`],
-      ),
-    },
-    ma: {
-      score: (1 - mood.density) * 0.45 + few * 0.45 + (1 - mood.arousal) * 0.2 - (photo && photo.count > 2 ? 0.2 : 0),
-      why: why(
-        [few >= 0.4, `мало слов (${text.wordCount})`],
-        [mood.density < 0.45, `разреженный день (плотность ${pct(mood.density)})`],
-        [mood.arousal < 0.4, 'тихий темп жизни'],
-      ),
-    },
-    collage: {
-      score: many * 0.55 + mood.density * 0.45 + Math.min((photo?.count ?? 0) / 8, 0.3),
-      why: why(
-        [(photo?.count ?? 0) >= 3, `${photo?.count} фото`],
-        [mood.density >= 0.55, `много событий (плотность ${pct(mood.density)})`],
-      ),
-    },
+// ---- Выбор техники: балл соответствия по нескольким признакам ----
+// У каждой техники — профиль: к какому значению признака она тянется (target, 0..1) и насколько этот признак для неё
+// важен (weight). Балл техники = взвешенная близость дня к профилю, нормированная к 0..1 (баллы техник сравнимы).
+// Побеждает наибольший балл. Профили заданы по смыслу техник, а не подогнаны под конкретные дни.
+// Признаки, кроме фото, — в основном из текста: энергия слов и событий, плотность, противоречие, время суток, объём.
+
+export type TechFeature = 'arousal' | 'valence' | 'warmth' | 'density' | 'volume' | 'contrast' | 'night' | 'dark' | 'photos';
+type Profile = Partial<Record<TechFeature, [target: number, weight: number]>>;
+
+export const TECHNIQUE_PROFILES: Record<TechniqueId, Profile> = {
+  // импрессионизм: светлый, спокойный, тёплый день при дневном свете, без надлома
+  softStrokes: { valence: [0.75, 1.2], arousal: [0.3, 1], warmth: [0.7, 0.8], night: [0, 0.6], contrast: [0.2, 0.4], dark: [0.3, 0.4] },
+  // Кандинский: напряжение — много энергии и событий, противоречия, не обязательно светло
+  geometric: { arousal: [0.85, 1.3], density: [0.75, 1], contrast: [0.6, 0.7], valence: [0.4, 0.4] },
+  // плёночная ночь: ночь в тексте, приглушённая энергия, сумрачное настроение. Тёмные снимки почти всегда сопровождают
+  // ночь (это один факт — темнота), поэтому весят меньше; энергия весит не меньше ночи: громкая ночь — не «тихая ночная»
+  filmNight: { night: [1, 1], dark: [0.85, 0.6], arousal: [0.3, 1.2], valence: [0.35, 0.6] },
+  // японское «ма»: пустота — мало событий, мало слов, тишина, мало кадров
+  ma: { density: [0.1, 1], volume: [0.1, 1.2], arousal: [0.15, 0.8], photos: [0, 0.5], contrast: [0.15, 0.3] },
+  // коллаж: плотная память — много событий и деталей, длинная запись, много кадров, живая энергия
+  collage: { density: [0.85, 1.1], volume: [0.85, 1], photos: [1, 0.6], arousal: [0.65, 0.6] },
+};
+
+/** Близость значения к цели: 1 — совпало, 0 — разошлись на ≥ 0,625 (линейно). */
+const FIT_SLOPE = 1.6;
+const fit = (x: number, t: number) => clamp(1 - Math.abs(x - t) * FIT_SLOPE);
+
+/** Объём записи 0..1 по числу слов (логарифмически): ~8 слов → 0, ~250 слов → 1. */
+export const textVolume = (words: number) => clamp(Math.log(Math.max(words, 1) / 8) / Math.log(250 / 8));
+
+/** Значения признаков дня (undefined — признак неизвестен и в балле не участвует). */
+export function techniqueFeatures({ mood, text, photo }: EngineInput): Partial<Record<TechFeature, number>> {
+  return {
+    arousal: mood.arousal, valence: mood.valence, warmth: mood.warmth, density: mood.density, contrast: mood.contrast,
+    volume: textVolume(text.wordCount),
+    // ночь — только из текста; темнота снимков — отдельный признак (не считаем одно и то же дважды).
+    // Время суток не названо — «скорее не ночь» (0,3), а не «неизвестно»: иначе ночная техника выигрывала бы
+    // на одних тёмных снимках, потому что её главный признак просто выпадал из балла
+    night: text.daypart === 'night' ? 1 : text.daypart === 'dusk' ? 0.6 : text.daypart === 'unknown' ? 0.3 : 0,
+    dark: photo ? 1 - photo.brightness : undefined,
+    photos: Math.min((photo?.count ?? 0) / 4, 1),
   };
-  return s;
 }
 
-export function chooseTechnique(input: EngineInput): { id: TechniqueId; why: string[] } {
+/** Человеческая причина по признаку — формулировка всегда соответствует самому значению (никаких
+ *  «спокойный день (возбуждение 60%)»): «спокойный» только при ≤ 40%, «энергичный» — при ≥ 60%. */
+function reason(f: TechFeature, x: number, input: EngineInput): string | null {
+  const { text, photo } = input;
+  const p = pct(x);
+  switch (f) {
+    case 'arousal': return x >= 0.6 ? `энергичный день (возбуждение ${p})` : x <= 0.4 ? `спокойный день (возбуждение ${p})` : `умеренная энергия (${p})`;
+    case 'valence': return x >= 0.6 ? `светлое настроение (${p})` : x <= 0.4 ? `тяжёлый день (светлость ${p})` : `ровное настроение (светлость ${p})`;
+    case 'warmth': return x >= 0.6 ? `тёплый день (${p})` : x <= 0.4 ? `холодный день (тепло ${p})` : null;
+    case 'density': return x >= 0.6 ? `много событий (плотность ${p})` : x <= 0.4 ? `мало событий (плотность ${p})` : `событий в меру (плотность ${p})`;
+    case 'volume': return x >= 0.6 ? `длинная запись (${words(text.wordCount)})` : x <= 0.35 ? `короткая запись (${words(text.wordCount)})` : null;
+    case 'contrast': return x >= 0.5 ? `противоречивый день (${p})` : x <= 0.3 ? `без внутренних противоречий (${p})` : null;
+    case 'night': return text.daypart === 'night' ? 'в тексте ночь' : text.daypart === 'dusk' ? 'в тексте вечер' : text.daypart === 'day' || text.daypart === 'dawn' ? 'в тексте день' : null;
+    case 'dark': return photo ? (x >= 0.6 ? `тёмные фото (яркость ${pct(photo.brightness)})` : x <= 0.4 ? `светлые фото (яркость ${pct(photo.brightness)})` : null) : null;
+    case 'photos': return photo ? (photo.count >= 3 ? `${photo.count} фото` : null) : 'без фото';
+  }
+}
+
+export type TechniqueScore = { score: number; why: string[] };
+
+/** Баллы всех техник и для каждой — 2–3 главные причины (признаки, которые больше всего дали в её балл). */
+export function scoreTechniques(input: EngineInput): Record<TechniqueId, TechniqueScore> {
+  const x = techniqueFeatures(input);
+  const out = {} as Record<TechniqueId, TechniqueScore>;
+  for (const id of Object.keys(TECHNIQUE_PROFILES) as TechniqueId[]) {
+    let sum = 0, wsum = 0;
+    const parts: { f: TechFeature; gain: number; fit: number }[] = [];
+    for (const [f, [t, w]] of Object.entries(TECHNIQUE_PROFILES[id]) as [TechFeature, [number, number]][]) {
+      const v = x[f];
+      if (v === undefined) continue;
+      const k = fit(v, t);
+      sum += k * w; wsum += w;
+      parts.push({ f, gain: k * w, fit: k });
+    }
+    const why = parts.filter((q) => q.fit >= 0.7).sort((a, b) => b.gain - a.gain)
+      .map((q) => reason(q.f, x[q.f]!, input)).filter((r): r is string => !!r).slice(0, 3);
+    out[id] = { score: wsum ? sum / wsum : 0, why };
+  }
+  return out;
+}
+
+export function chooseTechnique(input: EngineInput): { id: TechniqueId; why: string[]; score: number; runnerUp: { id: TechniqueId; score: number } } {
   const s = scoreTechniques(input);
-  let best: TechniqueId = 'softStrokes';
-  for (const k of Object.keys(s) as TechniqueId[]) if (s[k].score > s[best].score) best = k;
-  // ни один признак не выражен сильно — честно говорим, что техника выиграла по сумме
+  const ranked = (Object.keys(s) as TechniqueId[]).sort((a, b) => s[b].score - s[a].score);
+  const [best, second] = ranked;
   const m = input.mood;
-  return { id: best, why: s[best].why.length ? s[best].why : [`ровный день без выраженного признака: светлость ${pct(m.valence)}, возбуждение ${pct(m.arousal)}, тепло ${pct(m.warmth)}`] };
+  // ни один признак не совпал с профилем сильно — честно говорим, что техника выиграла по сумме
+  const why = s[best].why.length ? s[best].why
+    : [`ровный день без выраженного признака: светлость ${pct(m.valence)}, возбуждение ${pct(m.arousal)}, тепло ${pct(m.warmth)}`];
+  return { id: best, why, score: s[best].score, runnerUp: { id: second, score: s[second].score } };
 }
 
 /** Палитра без фото: непрерывная ось температуры (холод → сирень → тепло, в обход зелёного), а не словарь эмоций. */
@@ -197,11 +231,14 @@ export function buildStyle(input: EngineInput): { tokens: StyleTokens; explain: 
 
   // 5. explain[] — «Почему так выглядит»
   const explain: string[] = [];
-  explain.push(`${TECHNIQUES[technique.id].name} (${TECHNIQUES[technique.id].ref}): ${technique.why.slice(0, 3).join(', ') || 'нейтральный день'}.`);
+  const ru = technique.runnerUp;
+  const close = technique.score - ru.score < 0.03;
+  explain.push(`${TECHNIQUES[technique.id].name} (${TECHNIQUES[technique.id].ref}): ${technique.why.slice(0, 3).join(', ')}. `
+    + `${close ? 'Почти вровень' : 'Следом'} — ${TECHNIQUES[ru.id].name} (${fmt2(ru.score)} против ${fmt2(technique.score)}).`);
   if (audio?.source === 'audio') {
     explain.push(`Песня: ~${audio.bpm} BPM, ${modeApprox(audio) ? `${modeRu(audio.mode)} приблизительно (${audioKeyRu(audio)}) — его вклад в палитру ослаблен` : `${modeRu(audio.mode)}${audio.key ? ` (${audio.key})` : ''}`} — анализ файла → сфера делает вдох раз в ${fmt(1 / breath)} с, кадры меняются каждые ${fmt(rhythm)} с.`);
   } else if (audio?.source === 'meta') {
-    explain.push(`Песня по ссылке: темп ~${audio.bpm} и ${modeRu(audio.mode)} — приблизительная оценка по метаданным${genre ? ` (жанр: ${genre})` : ', жанр не распознан'}, не анализ аудио; учтена с весом ${pct(conf)} → ритм кадров ${fmt(rhythm)} с.`);
+    explain.push(`Песня по ссылке: темп ~${audio.bpm} и ${modeRu(audio.mode)} — приблизительная оценка по метаданным${genre ? ` (жанр: ${genre})` : ', жанр не распознан'}, не анализ аудио; учтена с весом ${pct(conf)}, остальное — темп текста → темп дня ~${mood.tempo} BPM, ритм кадров ${fmt(rhythm)} с.`);
   } else if (audio?.source === 'manual') {
     explain.push(`Темп ${audio.bpm} BPM и ${modeRu(audio.mode)} заданы вручную → ритм кадров ${fmt(rhythm)} с.`);
   } else {

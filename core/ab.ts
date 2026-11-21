@@ -94,6 +94,8 @@ export function textDiff(a: Variant, b: Variant): string[] {
     ? `Противоречие ${arrow(pct(ma.contrast), pct(mb.contrast))}: оболочка и ядро сферы разной температуры — смешанное состояние видно внутри неё.`
     : `Противоречие ${arrow(pct(ma.contrast), pct(mb.contrast))}: сфера почти однородна.`);
 
-  out.push(`Сфера получила другой рисунок: её сид включает текст дня; темп и лад песни те же (${Math.round(mb.tempo)} BPM).`);
+  out.push(Math.abs(ma.tempo - mb.tempo) >= 3
+    ? `Темп дня ${Math.round(ma.tempo)} → ${Math.round(mb.tempo)} BPM: песня та же, но её оценка по ссылке учитывается частично, остальное — энергия текста; кадры меняются каждые ${arrow(sec(a.tokens.rhythm), sec(b.tokens.rhythm))}.`
+    : `Темп дня почти тот же (~${Math.round(mb.tempo)} BPM): его задаёт песня, текст на него почти не влияет.`);
   return out.slice(0, 5);
 }

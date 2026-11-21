@@ -162,8 +162,11 @@ export function analyzeTextFallback(text: string): TextFeatures {
   const events = (tn.match(/[а-я]{3,}(л|ла|ли|ло)(?=[\s,.!?]|$)/g) || []).length;
   const commas = (text.match(/,/g) || []).length;
 
-  const density = clamp(0.5 * Math.min(events / 12, 1) + 0.3 * Math.min(wordCount / 160, 1)
-    + 0.2 * Math.min(commas / Math.max(1, sentences.length) / 3, 1));
+  // плотность событий: и сколько их (абсолютно), и как часто они идут (событий на слово) — короткая запись,
+  // набитая действиями («прыгали, кричали, танцевали»), плотная, хотя слов в ней мало; объём записи — отдельный признак
+  const eventRate = events / Math.max(wordCount, 1);
+  const density = clamp(0.4 * Math.min(events / 10, 1) + 0.35 * Math.min(eventRate / 0.25, 1)
+    + 0.1 * Math.min(wordCount / 160, 1) + 0.15 * Math.min(commas / Math.max(1, sentences.length) / 3, 1));
   const valence = clamp(0.5 + ((pos - neg) / (pos + neg + 2)) * 0.5 + Math.min(exclam, 3) * 0.02);
   const arousal = clamp(0.35 + ((hi - lo) / (hi + lo + 2)) * 0.45 + Math.min(exclam, 4) * 0.04 + density * 0.15);
   const warmth = clamp(0.5 + ((warm - cold) / (warm + cold + 2)) * 0.5);

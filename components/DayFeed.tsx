@@ -36,7 +36,7 @@ export default function DayFeed({ days, selected, thumbs, mobile, onPick }: {
           const meta = [
             moodSummary(d.mood),
             // без анализа файла темп — оценка, подписываем «≈»
-            d.mood.tempo ? `${d.song.analysis ? '' : '≈'}${Math.round(d.mood.tempo)} BPM` : '',
+            d.mood.tempo ? `${d.song.analysis?.source === 'audio' || d.song.analysis?.source === 'manual' ? '' : '≈'}${Math.round(d.mood.tempo)} BPM` : '',
             d.song.analysis && modeApprox(d.song.analysis) && d.mood.mode === d.song.analysis.mode ? `≈ ${modeRu(d.mood.mode)}` : modeRu(d.mood.mode),
             TECHNIQUES[d.tokens.technique].name,
           ].filter(Boolean).join(' · ');

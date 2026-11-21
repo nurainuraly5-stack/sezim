@@ -1,6 +1,6 @@
 // Признаки текста + фото + аудио → непрерывный MoodProfile. Чистая функция.
 import type { AudioFeatures, MoodProfile, PhotoFeatures, TextFeatures } from './types';
-import { clamp } from './color';
+import { clamp, lerp } from './color';
 
 type W = [value: number, weight: number];
 const wavg = (...xs: W[]) => {
@@ -56,9 +56,14 @@ export function buildMood(text: TextFeatures, photo?: PhotoFeatures, audio?: Aud
   let daypart = text.daypart;
   if (daypart === 'unknown' && photo) daypart = photo.brightness < 0.14 ? 'night' : photo.brightness > 0.6 ? 'day' : 'unknown';
 
+  // темп дня: из текста (энергия слов и событий), песня подмешивается с весом доверия к ней — анализ файла задаёт
+  // темп сам, а оценка по ссылке (вес ≤ 0,4) лишь сдвигает темп текста, а не заменяет его средними ~104 BPM
+  const textTempo = 70 + arousal * 80;
+  const tempo = audio ? (aw >= 1 ? audio.bpm : Math.round(lerp(textTempo, audio.bpm, aw))) : Math.round(textTempo);
+
   return {
     valence, arousal, warmth, density,
-    tempo: audio?.bpm ?? Math.round(70 + arousal * 80),
+    tempo,
     mode, daypart, contrast,
     motifs: text.motifs, quote: text.quote, title: text.title,
     voiceStyle: { pace: arousal < 0.38 ? 'slow' : arousal > 0.62 ? 'fast' : 'mid', warmth },
