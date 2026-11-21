@@ -3,7 +3,7 @@ import type { AudioFeatures, DayEntry, PhotoFeatures, SongMeta, TextFeatures } f
 import { analyzeTextFallback } from '@/core/analyze/text-fallback';
 import { mergeText, type LlmTextFeatures } from '@/core/analyze/merge-text';
 import { buildMood } from '@/core/mood';
-import { buildStyle } from '@/core/style-engine';
+import { buildStyle, STYLE_VERSION } from '@/core/style-engine';
 import { hashString } from '@/core/color';
 import { cacheGet, cacheSet, newId, putDay } from './db';
 import { ORB_RENDER_VERSION, renderOrbBlob } from '@/components/orb-engine';
@@ -131,6 +131,7 @@ export async function createDay(input: DraftInputs, opts: {
     song: { ...input.song, meta, analysis: input.audio },
     mood, tokens, explain, voice, thumb, thumbV: thumb ? ORB_RENDER_VERSION : undefined, createdAt,
     analysisEngine: text.engine, photoFeatures: input.photoFeatures, seed: opts.seed, authorTitle: opts.authorTitle,
+    styleV: STYLE_VERSION,
   };
   await putDay(day);
   return day;
@@ -140,3 +141,30 @@ function stripEmpty<T extends object>(o?: T): Partial<T> {
   if (!o) return {};
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== '' && v !== null)) as Partial<T>;
 }
+
+/** Пересчёт дня новой версией движка из его же признаков (текст — тот же анализ: ответ LLM из кэша или,
+ *  если его нет, повторный запрос; фото и песня — сохранённые признаки). Название и цитата остаются.
+ *  null — пересчитать честно нельзя (день был посчитан LLM, а ответа модели нет): день остаётся как был. */
+export async function restyleDay(d: DayEntry): Promise<DayEntry | null> {
+  let tf = await dayTextFeatures(d);
+  if (d.analysisEngine === 'llm' && tf.engine !== 'llm') {
+    const remote = await analyzeRemote(d.text, d.song.kind === 'link' ? d.song.url : undefined);
+    if (!remote?.llm) return null;
+    tf = { ...mergeText(analyzeTextFallback(d.text), remote.llm), title: d.mood.title, quote: d.mood.quote };
+  }
+  const audio = d.song.analysis;
+  const mood = buildMood(tf, d.photoFeatures, audio);
+  const { tokens, explain } = buildStyle({ mood, text: tf, photo: d.photoFeatures, audio, meta: d.song.meta });
+  // миниатюра — старой сферы: сбрасываем, архив перерисует
+  return { ...d, mood, tokens, explain, styleV: STYLE_VERSION, thumb: undefined, thumbV: undefined };
+}
+
+/** День текущей версии движка: устаревший пересчитывается и сохраняется; если пересчитать нельзя — как был. */
+export async function ensureStyle(d: DayEntry): Promise<DayEntry> {
+  if (d.styleV === STYLE_VERSION) return d;
+  const next = await restyleDay(d).catch((e) => { console.warn('restyle', d.id, e); return null; });
+  if (!next) return d;
+  await putDay(next);
+  return next;
+}
+

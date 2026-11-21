@@ -77,13 +77,14 @@ async function prepare(s: (typeof SEED_DAYS)[number]) {
     if (!r.ok) throw new Error(`${base + f}: ${r.status}`);
     return r;
   };
-  const [text, song, meta, raw] = await Promise.all([
-    get('text.md').then((r) => r.text()),
-    get('song.json').then((r) => r.json() as Promise<SeedSong>),
-    get('meta.json').then((r) => r.json() as Promise<SeedMeta>),
-    Promise.all(s.photos.map((f) => get(f).then((r) => r.blob()))),
+  // текст и ссылка уходят в анализ (LLM, до 10 с) сразу, как только загружены, — параллельно со скачиванием и сжатием фото
+  const textP = get('text.md').then((r) => r.text()).then((t) => t.trim());
+  const songP = get('song.json').then((r) => r.json() as Promise<SeedSong>);
+  const remoteP = Promise.all([textP, songP]).then(([t, sg]) => analyzeRemote(t, sg.url));
+  const photosP = Promise.all(s.photos.map((f) => get(f).then((r) => r.blob()).then((b) => resizePhoto(b, 1000))));
+  const photoFeaturesP = photosP.then(analyzePhotos);
+  const [text, song, meta, photos, photoFeatures, remote] = await Promise.all([
+    textP, songP, get('meta.json').then((r) => r.json() as Promise<SeedMeta>), photosP, photoFeaturesP, remoteP,
   ]);
-  const photos = await Promise.all(raw.map((b) => resizePhoto(b, 1000)));
-  const [photoFeatures, remote] = await Promise.all([analyzePhotos(photos), analyzeRemote(text.trim(), song.url)]);
-  return { text: text.trim(), song, meta, photos, photoFeatures, remote };
+  return { text, song, meta, photos, photoFeatures, remote };
 }

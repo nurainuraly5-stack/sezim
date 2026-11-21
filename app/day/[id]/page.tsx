@@ -13,10 +13,11 @@ import DayCompare, { type CompareKind } from '@/components/DayCompare';
 import TempoModeChips from '@/components/TempoModeChips';
 import { ORB_RENDER_VERSION, renderOrbBlob } from '@/components/orb-engine';
 import { computeVariant } from '@/core/ab';
+import { STYLE_VERSION } from '@/core/style-engine';
 import { TEMPO_PRESETS, linkAudio, type ManualSong } from '@/core/analyze/song-link';
 import { deleteDay, getDay, listDays, putDay } from '@/lib/db';
 import { DayPlayer, loadBrowserVoices, pickRuVoice } from '@/lib/player';
-import { dayTextFeatures, isTtsConfigured, renderVoice, voiceScript } from '@/lib/pipeline';
+import { createDay, dayTextFeatures, ensureStyle, isTtsConfigured, renderVoice, voiceScript, type AnalyzeResponse } from '@/lib/pipeline';
 import { download, exportDayZip, folderName } from '@/lib/zip';
 import { warmOrbEngine } from '@/components/orb-engine';
 import { orbParams, orbSource } from '@/core/orb';
@@ -27,7 +28,7 @@ import { dayTheme, orbFrame, orbSize } from '@/design/tokens';
 export default function DayPage() {
   const { id } = useParams<{ id: string }>();
   const [day, setDay] = useState<DayEntry | null | undefined>(undefined);
-  useEffect(() => { getDay(id).then((d) => setDay(d ?? null)); }, [id]);
+  useEffect(() => { getDay(id).then(async (d) => setDay(d ? await ensureStyle(d) : null)); }, [id]);
 
   if (day === undefined) return <AppShell><div className="min-h-[60vh]" /></AppShell>;
   if (day === null) {
@@ -141,11 +142,23 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
     const audio = linkAudio(d.song.meta, m);
     const tf = await dayTextFeatures(d);
     const v = computeVariant({ text: d.text, createdAt: d.createdAt, textFeatures: tf, photo: d.photoFeatures }, audio, d.song.meta);
-    const next: DayEntry = { ...d, mood: v.mood, tokens: v.tokens, explain: v.explain, song: { ...d.song, analysis: audio } };
+    const next: DayEntry = { ...d, mood: v.mood, tokens: v.tokens, explain: v.explain, song: { ...d.song, analysis: audio }, styleV: STYLE_VERSION };
     const thumb = await renderOrbBlob(orbParams(orbSource(next)), orbSize.thumb).catch(() => undefined);
     const saved = { ...next, thumb, thumbV: thumb ? ORB_RENDER_VERSION : undefined };
     await putDay(saved);
     onChange(saved);
+  }
+
+  /** «Заменить» из сравнения: тот же день (id, дата, фото, песня), новый текст — тот же конвейер, что при создании. */
+  async function replaceText(text: string, remote?: AnalyzeResponse | null) {
+    stopListening();
+    const next = await createDay({
+      text, photos: d.photos, photoFeatures: d.photoFeatures, date: d.date, audio: d.song.analysis,
+      song: { kind: d.song.kind, url: d.song.url, file: d.song.file, fileName: d.song.fileName, meta: d.song.meta },
+    }, { id: d.id, createdAt: d.createdAt, seed: d.seed, remote });
+    setOthers(null);
+    onChange(next);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function saveTitle() {
@@ -238,17 +251,17 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
             </div>
             <div className="grid w-full max-w-sm grid-cols-1 gap-2">
               <button className="btn" onClick={() => openCompare('song')} aria-expanded={!!others && compareKind === 'song'} aria-controls="compare">{S.compare}</button>
-              <button className="btn" onClick={() => openCompare('text')} aria-expanded={!!others && compareKind === 'text'} aria-controls="compare">{S.compareText}</button>
             </div>
           </div>
         </section>
 
-        {others && <DayCompare day={d} others={others} mobile={mobile} kind={compareKind} onKind={setCompareKind} onClose={() => setOthers(null)} />}
+        {others && <DayCompare day={d} others={others} mobile={mobile} kind={compareKind} onKind={setCompareKind} onClose={() => setOthers(null)} onReplaceText={replaceText} />}
 
         <section className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           <article className="card p-5">
             <h2 className="t-h3">{S.aboutDay}</h2>
             <p className="t-body mt-3 whitespace-pre-line">{d.text}</p>
+            <button className="btn mt-4" onClick={() => openCompare('text')} aria-expanded={!!others && compareKind === 'text'} aria-controls="compare">{S.compareText}</button>
             {d.mood.motifs.length > 0 && (
               <ul className="mt-4 flex flex-wrap gap-2" aria-label={S.momentsOfDay}>
                 {d.mood.motifs.map((m) => <li key={m} className="chip">{m}</li>)}

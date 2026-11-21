@@ -14,7 +14,7 @@ export function atmosphereAxes(m: MoodProfile): Axis[] {
     { key: 'warmth', label: 'Тепло', v: m.warmth, value: pct(m.warmth), hint: 'холодные или тёплые детали, фото и лад' },
     { key: 'density', label: 'Плотность', v: m.density, value: pct(m.density), hint: 'сколько событий и кадров' },
     { key: 'contrast', label: 'Противоречие', v: m.contrast, value: pct(m.contrast), hint: 'например: холодно, но тепло' },
-    { key: 'tempo', label: 'Темп', v: tempoNorm(m.tempo), value: `${Math.round(m.tempo)} BPM`, hint: 'темп песни или текста' },
+    { key: 'tempo', label: 'Темп', v: tempoNorm(m.tempo), value: `${Math.round(m.tempo)} BPM`, hint: 'энергия текста; песня — с весом доверия к ней (файл задаёт темп сам)' },
   ];
 }
 

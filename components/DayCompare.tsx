@@ -10,7 +10,7 @@ import { S, audioModeRu, formatDateShort } from '@/core/strings';
 import { analyzeAudioFile } from '@/core/analyze/audio';
 import { analyzeTextFallback } from '@/core/analyze/text-fallback';
 import { linkAudio, parseSongLink, type ManualSong } from '@/core/analyze/song-link';
-import { analyzeRemote, dayTextFeatures, mergeText } from '@/lib/pipeline';
+import { analyzeRemote, dayTextFeatures, mergeText, type AnalyzeResponse } from '@/lib/pipeline';
 import { orbFrame, orbSize } from '@/design/tokens';
 import Orb from './Orb';
 import { songLabel } from './SongPlayer';
@@ -20,7 +20,7 @@ export type CompareKind = 'song' | 'text';
 type SongMode = 'day' | 'file' | 'link';
 type TextMode = 'day' | 'own';
 type Pick = { audio?: AudioFeatures; meta?: SongMeta; label: string; source: string };
-type TextPick = { text: string; features: TextFeatures; label: string; source: string };
+type TextPick = { text: string; features: TextFeatures; label: string; source: string; remote?: AnalyzeResponse | null };
 
 const fmtSec = (v: number) => `${v.toFixed(1).replace('.', ',')} с`;
 const pctS = (v: number) => `${Math.round(v * 100)}%`;
@@ -46,8 +46,10 @@ function mostDifferent(A: Variant, others: DayEntry[], variant: (o: DayEntry) =>
   return best;
 }
 
-export default function DayCompare({ day, others, mobile, kind, onKind, onClose }: {
+export default function DayCompare({ day, others, mobile, kind, onKind, onClose, onReplaceText }: {
   day: DayEntry; others: DayEntry[]; mobile: boolean; kind: CompareKind; onKind: (k: CompareKind) => void; onClose: () => void;
+  /** «Заменить»: текст B становится текстом дня (remote — уже полученный ответ анализа, чтобы не спрашивать модель дважды) */
+  onReplaceText: (text: string, remote?: AnalyzeResponse | null) => Promise<void>;
 }) {
   const songDays = useMemo(() => others.filter((o) => o.id !== day.id && o.song.analysis), [others, day.id]);
   const textDays = useMemo(() => others.filter((o) => o.id !== day.id && o.text.trim()), [others, day.id]);
@@ -93,7 +95,8 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose 
   }, [songMode, songDays, songDayId, file, fileAudio, link, linkMeta, manual, url]);
 
   // --- текст B: признаки текста другого дня — как у того дня (упрощённый анализ или LLM-ответ из кэша)
-  const [textMode, setTextMode] = useState<TextMode>(textDays.length ? 'day' : 'own');
+  // свой текст — по умолчанию: поле, куда вписать или вставить другой текст; текст другого дня — вторая вкладка
+  const [textMode, setTextMode] = useState<TextMode>('own');
   const [textDayId, setTextDayId] = useState<string>();
   const [otherFeatures, setOtherFeatures] = useState<Record<string, TextFeatures>>({});
   const [own, setOwn] = useState('');
@@ -106,15 +109,23 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose 
     return () => { off = true; };
   }, [textDays]);
 
-  /** Свой текст — тот же анализ, что у нового дня: LLM, если доступен, иначе упрощённый. */
+  /** Свой текст — тот же анализ, что у нового дня: LLM, если доступен (клиент ждёт до 10 с, сервер — модель до 9 с),
+   *  иначе упрощённый. Если модель настроена, но не ответила, — так и подписано. */
   async function recalcOwn() {
     const t = own.trim();
-    if (t.split(/\s+/).length < 3) return;
+    if (!t) return;
     setOwnBusy(true);
     const remote = await analyzeRemote(t);
     const features = mergeText(analyzeTextFallback(t), remote?.llm ?? null);
-    setOwnPick({ text: t, features, label: features.title, source: engineRu(features) });
+    const fellBack = !remote?.llm && !!remote?.llmReason && !/LLM_PROVIDER=none|disabled/.test(remote.llmReason);
+    setOwnPick({ text: t, features, label: features.title, source: fellBack ? S.llmFellBack : engineRu(features), remote });
     setOwnBusy(false);
+  }
+  const [replacing, setReplacing] = useState(false);
+  async function replace(p: TextPick) {
+    if (!window.confirm(S.confirmReplace)) return;
+    setReplacing(true);
+    try { await onReplaceText(p.text, p.remote); } finally { setReplacing(false); }
   }
 
   const textPick: TextPick | null = useMemo(() => {
@@ -207,8 +218,8 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose 
       ) : (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-2" role="group" aria-label="Откуда взять другой текст">
+            <button className="chip" aria-pressed={textMode === 'own'} onClick={() => setTextMode('own')}>{S.pickOwnText}</button>
             {textDays.length > 0 && <button className="chip" aria-pressed={textMode === 'day'} onClick={() => setTextMode('day')}>{S.pickOtherText}</button>}
-            <button className="chip" aria-pressed={textMode === 'own'} onClick={() => { setTextMode('own'); if (!own) setOwn(day.text); }}>{S.pickOwnText}</button>
           </div>
           {textMode === 'day' && (
             <div className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="group" aria-label={S.pickOtherText}>
@@ -222,8 +233,11 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose 
           )}
           {textMode === 'own' && (
             <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); recalcOwn(); }}>
-              <textarea className="field min-h-[7rem]" value={own} onChange={(e) => setOwn(e.target.value)} placeholder={S.ownTextPlaceholder} aria-label={S.pickOwnText} />
-              <button className="btn self-start" type="submit" disabled={ownBusy || own.trim().split(/\s+/).length < 3}>{ownBusy ? S.recalcBusy : S.recalc}</button>
+              <textarea autoFocus className="field min-h-[7rem]" value={own} onChange={(e) => setOwn(e.target.value)} placeholder={S.ownTextPlaceholder} aria-label={S.pickOwnText} />
+              <div className="flex flex-wrap items-center gap-3">
+                <button className="btn" type="submit" disabled={ownBusy || !own.trim()}>{ownBusy ? S.recalcBusy : S.recalc}</button>
+                <p className="t-micro measure">{S.recalcHint}</p>
+              </div>
             </form>
           )}
         </div>
@@ -250,6 +264,11 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose 
             {diff.map((d) => <li key={d} className="t-caption border-l-2 pl-3" style={{ color: 'var(--ink)', borderColor: 'var(--accent)' }}>{d}</li>)}
           </ul>
         </div>
+      )}
+
+      {/* оригинал не меняется, пока человек явно не выберет «Заменить» */}
+      {!song && B && textPick && textPick.text.trim() !== day.text.trim() && (
+        <button className="btn btn-primary self-start" onClick={() => replace(textPick)} disabled={replacing}>{replacing ? S.replaceBusy : S.replaceText}</button>
       )}
     </section>
   );

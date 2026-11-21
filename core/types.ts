@@ -69,4 +69,5 @@ export type DayEntry = {
   photoFeatures?: PhotoFeatures;       // + для «Почему» и A/B
   seed?: boolean;                      // + день из seed-дневника
   authorTitle?: string;                // + рабочее название автора (seed meta.json) — только справка, не название дня
+  styleV?: number;                     // + версия Style Engine: дни старой версии пересчитываются из своих признаков
 };

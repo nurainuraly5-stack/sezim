@@ -12,6 +12,7 @@ import { warmShaders } from '@/components/gl-warmup';
 import { orbWebglAvailable } from '@/components/orb-engine';
 import { orbParams, orbSource } from '@/core/orb';
 import { listDays } from '@/lib/db';
+import { ensureStyle } from '@/lib/pipeline';
 import { reseed, seedIfEmpty } from '@/lib/seed';
 import { S, formatDate, formatMonth } from '@/core/strings';
 import type { DayEntry } from '@/core/types';
@@ -57,6 +58,8 @@ export default function ArchivePage() {
         console.warn('seed failed', e);
       }
       setSeeding(null);
+      // дни, посчитанные прошлой версией движка, пересчитываются из своих признаков (название и цитата те же)
+      for (const d of await listDays()) await ensureStyle(d);
       setDays(await listDays());
     })();
   }, []);

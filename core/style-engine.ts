@@ -10,6 +10,10 @@ import { metaGenreGuess } from './analyze/song-link';
 import { audioTrust } from './mood';
 import { audioKeyRu, modeApprox } from './strings';
 
+/** Версия правил движка: меняется, когда меняется расчёт mood/tokens/explain — сохранённые дни старой версии
+ *  пересчитываются из своих признаков (lib/pipeline.ts restyleDay). 2 — выбор техники по профилям признаков. */
+export const STYLE_VERSION = 2;
+
 export const TECHNIQUES: Record<TechniqueId, { name: string; ref: string }> = {
   softStrokes: { name: 'Soft Strokes', ref: 'импрессионизм: мазки и мягкий свет' },
   geometric: { name: 'Geometric Tension', ref: 'Кандинский: линии, пятна, жёсткая сетка' },
@@ -46,8 +50,9 @@ export const TECHNIQUE_PROFILES: Record<TechniqueId, Profile> = {
   // плёночная ночь: ночь в тексте, приглушённая энергия, сумрачное настроение. Тёмные снимки почти всегда сопровождают
   // ночь (это один факт — темнота), поэтому весят меньше; энергия весит не меньше ночи: громкая ночь — не «тихая ночная»
   filmNight: { night: [1, 1], dark: [0.85, 0.6], arousal: [0.3, 1.2], valence: [0.35, 0.6] },
-  // японское «ма»: пустота — мало событий, мало слов, тишина, мало кадров
-  ma: { density: [0.1, 1], volume: [0.1, 1.2], arousal: [0.15, 0.8], photos: [0, 0.5], contrast: [0.15, 0.3] },
+  // японское «ма»: пустота — мало событий, мало слов, тишина, мало кадров. Тишина весит не меньше краткости:
+  // короткая, но громкая запись («бегом: экзамен, концерт!») — не «ма» (то же правило, что у плёночной ночи)
+  ma: { density: [0.1, 1], volume: [0.1, 1.2], arousal: [0.15, 1.2], photos: [0, 0.5], contrast: [0.15, 0.3] },
   // коллаж: плотная память — много событий и деталей, длинная запись, много кадров, живая энергия
   collage: { density: [0.85, 1.1], volume: [0.85, 1], photos: [1, 0.6], arousal: [0.65, 0.6] },
 };
