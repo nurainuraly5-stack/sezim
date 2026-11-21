@@ -72,13 +72,20 @@ function DayView({ day: d, onChange }: { day: DayEntry; onChange: (d: DayEntry) 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // «Слушать день» показываем, только если голос реально есть: сохранённый, серверный TTS или русский голос браузера
+  // Голоса браузер отдаёт асинхронно: при первом запуске синтеза в новом окне Chrome на Windows — дольше, чем ждёт
+  // loadBrowserVoices, и без перепроверки кнопка на этой странице так и не появлялась. Поэтому слушаем voiceschanged.
   useEffect(() => {
     let off = false;
+    const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
+    const recheck = () => { if (!off && synth && pickRuVoice(synth.getVoices())) setVoiceOk(true); };
+    synth?.addEventListener('voiceschanged', recheck);
     (async () => {
       const ok = !!d.voice || (await isTtsConfigured()) || !!pickRuVoice(await loadBrowserVoices());
-      if (!off) setVoiceOk(ok);
+      if (off) return;
+      if (ok) setVoiceOk(true);
+      else recheck(); // голоса могли прийти, пока ждали TTS
     })();
-    return () => { off = true; };
+    return () => { off = true; synth?.removeEventListener('voiceschanged', recheck); };
   }, [d.voice]);
   useEffect(() => () => player.current?.stop(), []);
 
