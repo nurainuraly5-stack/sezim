@@ -56,7 +56,20 @@ function fromStored(r: StoredDay): DayEntry {
 export const listDays = async () => (await db.days.orderBy('date').reverse().toArray()).map(fromStored);
 export const getDay = async (id: string) => { const r = await db.days.get(id); return r ? fromStored(r) : undefined; };
 export const putDay = async (d: DayEntry) => db.days.put(await toStored(d));
-export const deleteDay = (id: string) => db.days.delete(id);
+/** Демо-дни, которые человек удалил сам: seed их не возвращает. Хранится в той же базе, что и дни, —
+ *  очистка данных сайта сбрасывает и то и другое разом (флаг в localStorage мог пережить базу и навсегда выключить seed). */
+export const SEED_REMOVED_KEY = 'seed:removed';
+
+export async function deleteDay(id: string) {
+  await db.transaction('rw', db.days, db.cache, async () => {
+    const d = await db.days.get(id);
+    if (d?.seed) {
+      const removed = (await db.cache.get(SEED_REMOVED_KEY))?.value as string[] | undefined;
+      await db.cache.put({ key: SEED_REMOVED_KEY, value: [...new Set([...(removed ?? []), id])], at: Date.now() });
+    }
+    await db.days.delete(id);
+  });
+}
 /** Перерисованная миниатюра сферы (архив обновляет устаревшие). */
 export const putThumb = async (id: string, thumb: Blob, thumbV: number) => db.days.update(id, { thumb: await pack(thumb), thumbV });
 

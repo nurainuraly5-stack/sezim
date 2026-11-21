@@ -106,6 +106,9 @@ function getEngine(): OrbEngine | null {
   return engine;
 }
 
+/** Есть ли WebGL для сфер (false — компонент Orb рисует упрощённую плоскую сферу). */
+export const orbWebglAvailable = () => getEngine() !== null;
+
 /** Телефон/планшет с тач-экраном — упрощённый шейдер. */
 export const preferLite = () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 

@@ -4,62 +4,70 @@
 import { analyzePhotos, resizePhoto } from '@/core/analyze/photo';
 import { linkAudio } from '@/core/analyze/song-link';
 import { analyzeRemote, createDay } from './pipeline';
-import { db } from './db';
+import { SEED_REMOVED_KEY, cacheGet, cacheSet, db } from './db';
 import { SEED_DAYS, SEED_DIR, SEED_VERSION, type SeedMeta, type SeedSong } from './seed-data';
 
-const FLAG = 'sezim:seeded';
+/** Флаг прошлых версий в localStorage. Больше не читается: он переживал очистку IndexedDB и прерванную сборку
+ *  и тогда навсегда выключал демо-дневник (пустой архив на «обжитом» десктопном профиле). Только удаляем. */
+const LEGACY_FLAG = 'sezim:seeded';
 let running: Promise<void> | null = null;
 
 type Progress = (i: number, n: number) => void | Promise<void>;
 
-/** При первом открытии собирает демо-дневник; старый набор seed-дней (другая версия) заменяет.
- *  Если человек сам удалил демо-дни, они не возвращаются. onProgress(i, n) — прогресс на экране. */
+/** id демо-дня постоянный: по нему видно, какие дни набора уже записаны, а повторная сборка
+ *  (другая вкладка, прерванный заход) перезаписывает день, а не дублирует. */
+export const seedDayId = (dir: string) => `seed-${SEED_VERSION}-${dir}`;
+
+/** Достраивает демо-дневник до полного набора по тому, что реально лежит в базе: недостающие дни собираются
+ *  (в том числе после прерванной или частично упавшей сборки), дни старого набора заменяются.
+ *  Дни, которые человек удалил сам, не возвращаются. onProgress(i, n) — прогресс на экране. */
 export function seedIfEmpty(onProgress?: Progress): Promise<void> {
   if (running) return running;
   running = (async () => {
-    const flag = readFlag();
-    if (flag === SEED_VERSION) return;
-    const all = await db.days.toArray();
-    const oldSeed = all.filter((d) => d.seed);
-    if (flag && !oldSeed.length) { writeFlag(); return; } // демо-дни были удалены — уважаем это
-    if (!flag && all.length > oldSeed.length) return;      // свой дневник без демо — не вмешиваемся
-    await db.days.bulkDelete(oldSeed.map((d) => d.id));
-    await build(onProgress);
+    try { localStorage.removeItem(LEGACY_FLAG); } catch {}
+    const removed = new Set((await cacheGet<string[]>(SEED_REMOVED_KEY)) ?? []);
+    const current = new Set(SEED_DAYS.map((s) => seedDayId(s.dir)));
+    const seedIds = (await db.days.filter((d) => !!d.seed).primaryKeys()) as string[];
+    const stale = seedIds.filter((id) => !current.has(id));
+    if (stale.length) await db.days.bulkDelete(stale);
+    const have = new Set(seedIds);
+    const missing = SEED_DAYS.filter((s) => !have.has(seedDayId(s.dir)) && !removed.has(seedDayId(s.dir)));
+    if (missing.length) await build(missing, onProgress);
   })().finally(() => { running = null; });
   return running;
 }
 
-/** Пересобрать демо-дни заново (например, когда на сервере появился ключ LLM): `/?reseed=1`. */
+/** Пересобрать демо-дни заново (например, когда на сервере появился ключ LLM): `/?reseed=1`.
+ *  Возвращает и удалённые вручную. */
 export async function reseed(onProgress?: Progress) {
   if (running) await running;
-  const seedIds = (await db.days.toArray()).filter((d) => d.seed).map((d) => d.id);
+  const seedIds = (await db.days.filter((d) => !!d.seed).primaryKeys()) as string[];
   await db.days.bulkDelete(seedIds);
-  try { localStorage.removeItem(FLAG); } catch {}
+  await cacheSet(SEED_REMOVED_KEY, []);
   await seedIfEmpty(onProgress);
 }
 
-async function build(onProgress?: Progress) {
-  const n = SEED_DAYS.length;
+async function build(days: typeof SEED_DAYS, onProgress?: Progress) {
+  const n = days.length;
   await onProgress?.(0, n);
-  // все дни готовятся параллельно (сеть, анализ фото, LLM), сохраняются по порядку — сферы появляются по одной
-  const prepared = SEED_DAYS.map((s) => prepare(s).catch((e) => { console.warn('seed day failed', s.dir, e); return null; }));
-  let failed = 0;
+  // все дни готовятся параллельно (сеть, анализ фото, LLM), сохраняются по порядку — сферы появляются по одной;
+  // день, который не собрался, просто остаётся недостающим и соберётся при следующем открытии архива
+  const prepared = days.map((s) => prepare(s).catch((e) => { console.warn('seed day failed', s.dir, e); return null; }));
   for (let i = 0; i < n; i++) {
     const p = await prepared[i];
-    if (!p) { failed++; continue; }
-    try {
-      await createDay({
-        text: p.text, photos: p.photos, photoFeatures: p.photoFeatures, date: p.meta.date,
-        audio: linkAudio(p.remote?.songMeta ?? undefined, {}),
-        song: { kind: 'link', url: p.song.url },
-      }, { seed: true, createdAt: Date.parse(p.meta.date), remote: p.remote, authorTitle: p.meta.userTitleHint });
-    } catch (e) {
-      console.warn('seed day not saved', SEED_DAYS[i].dir, e); // один день не сохранился — остальные всё равно появятся
-      failed++;
+    if (p) {
+      try {
+        await createDay({
+          text: p.text, photos: p.photos, photoFeatures: p.photoFeatures, date: p.meta.date,
+          audio: linkAudio(p.remote?.songMeta ?? undefined, {}),
+          song: { kind: 'link', url: p.song.url },
+        }, { id: seedDayId(days[i].dir), seed: true, createdAt: Date.parse(p.meta.date), remote: p.remote, authorTitle: p.meta.userTitleHint });
+      } catch (e) {
+        console.warn('seed day not saved', days[i].dir, e); // один день не сохранился — остальные всё равно появятся
+      }
     }
     await onProgress?.(i + 1, n);
   }
-  if (!failed) writeFlag(); // не всё загрузилось — при следующем открытии демо-дни соберутся заново
 }
 
 async function prepare(s: (typeof SEED_DAYS)[number]) {
@@ -78,11 +86,4 @@ async function prepare(s: (typeof SEED_DAYS)[number]) {
   const photos = await Promise.all(raw.map((b) => resizePhoto(b, 1000)));
   const [photoFeatures, remote] = await Promise.all([analyzePhotos(photos), analyzeRemote(text.trim(), song.url)]);
   return { text: text.trim(), song, meta, photos, photoFeatures, remote };
-}
-
-function readFlag() {
-  try { return localStorage.getItem(FLAG); } catch { return null; }
-}
-function writeFlag() {
-  try { localStorage.setItem(FLAG, SEED_VERSION); } catch {}
 }

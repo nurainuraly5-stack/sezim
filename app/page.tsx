@@ -9,6 +9,7 @@ import OrbGrid from '@/components/OrbGrid';
 import { useOrbThumbs } from '@/components/useOrbThumbs';
 import { useMedia } from '@/components/useMedia';
 import { warmShaders } from '@/components/gl-warmup';
+import { orbWebglAvailable } from '@/components/orb-engine';
 import { orbParams, orbSource } from '@/core/orb';
 import { listDays } from '@/lib/db';
 import { reseed, seedIfEmpty } from '@/lib/seed';
@@ -29,6 +30,8 @@ export default function ArchivePage() {
   const mobile = useMedia('(max-width: 767px)');
   const withPanel = useMedia('(min-width: 1280px)', true);
   const [view, setView] = useState<View>('orbs');
+  const [noGl, setNoGl] = useState(false);
+  useEffect(() => { setNoGl(!orbWebglAvailable()); }, []);
 
   // выбранный вид — удобство одного зрителя: помним в localStorage, без него работает вид по умолчанию
   useEffect(() => {
@@ -122,6 +125,7 @@ export default function ArchivePage() {
                 ))}
               </div>
             )}
+            {noGl && view === 'orbs' && <p className="t-caption measure mt-4" role="status" data-webgl-notice>{S.noWebgl}</p>}
             {seeding && <p className="t-caption mt-4" aria-live="polite">{S.seeding(seeding[0], seeding[1])}</p>}
 
             <div className="mt-6">
