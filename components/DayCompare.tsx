@@ -114,8 +114,11 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose,
   async function recalcOwn() {
     const t = own.trim();
     if (!t) return;
+    // тот же текст, что у дня, — те же признаки (модель недетерминирована: повторный запрос дал бы ложные «изменения»)
+    if (text && t === day.text.trim()) { setOwnPick({ text: t, features: text, label: text.title, source: engineRu(text) }); return; }
     setOwnBusy(true);
-    const remote = await analyzeRemote(t);
+    // песня та же, что у дня, — и ключ кэша анализа тот же, что при создании дня
+    const remote = await analyzeRemote(t, day.song.kind === 'link' ? day.song.url : undefined);
     const features = mergeText(analyzeTextFallback(t), remote?.llm ?? null);
     const fellBack = !remote?.llm && !!remote?.llmReason && !/LLM_PROVIDER=none|disabled/.test(remote.llmReason);
     setOwnPick({ text: t, features, label: features.title, source: fellBack ? S.llmFellBack : engineRu(features), remote });
