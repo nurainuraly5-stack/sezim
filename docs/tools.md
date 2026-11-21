@@ -32,3 +32,29 @@
 | 6 | 14.11.2026 | Dark Red | Steve Lacy | https://youtu.be/5da3D9ZfMQo | R&BHype |
 
 Название и исполнитель — так, как их отдаёт oEmbed («Исполнитель - Песня» в заголовке видео); по каналам не проверялись.
+
+## Библиотеки, шрифт и лицензии
+
+Версии — установленные (`package-lock.json`), лицензии — из `package.json` пакетов.
+
+| Пакет | Версия | Лицензия | Зачем |
+|---|---|---|---|
+| Manrope (шрифт) | Google Fonts через `next/font` | SIL Open Font License 1.1 | весь интерфейс, latin + cyrillic |
+| next | 15.5.29 | MIT | фреймворк, App Router, API-маршруты |
+| react, react-dom | 19.1.0 | MIT | интерфейс |
+| @anthropic-ai/sdk | 1.10.0 | Apache-2.0 | анализ текста моделью (сервер) |
+| dexie | 4.4.7 | Apache-2.0 | IndexedDB |
+| jszip | 3.10.2 | MIT или GPL-3.0-or-later (используется под MIT) | экспорт папки дня |
+| zod | 4.6.7 | MIT | проверка ответа модели |
+| server-only | 0.0.1 | MIT | ключи только на сервере |
+| tailwindcss, @tailwindcss/postcss | 4.3.5 | MIT | стили (сборка) |
+| typescript | 5.9.3 | Apache-2.0 | типы (сборка) |
+| eslint | 9.39.5 | MIT | линтер (разработка) |
+| eslint-config-next | 15.5.29 | MIT | линтер (разработка) |
+| @eslint/eslintrc | 3.3.7 | MIT | линтер (разработка) |
+| @types/node | 20.19.43 | MIT | типы (разработка) |
+| @types/react, @types/react-dom | 19.3.0 | MIT | типы (разработка) |
+
+Транзитивно в production-дереве 75 пакетов: MIT, Apache-2.0, ISC, BSD, 0BSD, Unlicense (`fast-sha256`), CC-BY-4.0
+(данные `caniuse-lite`), MIT AND Zlib (`pako`). LGPL-3.0 — только необязательные платформенные бинарники `@img/sharp-*`
+(оптимизация изображений Next.js, libvips), приложением не используются.
