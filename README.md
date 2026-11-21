@@ -125,6 +125,7 @@ LLM_MODEL=claude-sonnet-5-5     # необязательно; по умолча�
 
 ## Лицензии
 
+Код — MIT (`LICENSE`).
+Тексты и фото демо-дней (`public/seed/`) — © команда Sezim, показываются только для оценки проекта и под MIT не распространяются.
 Шрифт Manrope — SIL Open Font License 1.1 (Google Fonts, через `next/font`). Зависимости — MIT / Apache-2.0 / ISC / BSD;
 jszip — двойная лицензия MIT или GPL-3.0 (используется под MIT). Полный список — `docs/tools.md`.
-Лицензия самого репозитория пока не выбрана.
