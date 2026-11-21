@@ -25,7 +25,9 @@ const unit = z.number().transform((v) => Math.min(1, Math.max(0, v)));
 /** Пост-валидация: диапазоны и длины (то, что structured outputs не гарантирует). */
 export const LlmTextChecked = LlmTextSchema.extend({
   valence: unit, arousal: unit, warmth: unit, density: unit, contrast: unit,
-  motifs: z.array(z.string().min(1).max(40)).min(1).transform((a) => a.slice(0, 6)),
+  // пустой список деталей не обнуляет весь ответ: название и оценки модели остаются, а недостающие детали
+  // подставляет упрощённый анализ (core/analyze/merge-text.ts — если от модели меньше трёх)
+  motifs: z.array(z.string().min(1).max(40)).transform((a) => a.slice(0, 6)),
   warmMotifs: z.array(z.string().max(40)).transform((a) => a.slice(0, 4)),
   coldMotifs: z.array(z.string().max(40)).transform((a) => a.slice(0, 4)),
   quote: z.string().min(2).max(160),
@@ -51,7 +53,10 @@ Never diagnose or make medical/psychological claims.`;
 
 export type LlmResult = { ok: true; data: z.output<typeof LlmTextChecked>; provider: string } | { ok: false; reason: string };
 
-export async function analyzeWithLlm(text: string, timeoutMs = 8000): Promise<LlmResult> {
+/** Таймаут модели: 9 с — меньше клиентского (10 с, lib/pipeline.ts), чтобы сервер успел ответить «упрощённым анализом». */
+export const LLM_TIMEOUT_MS = 9000;
+
+export async function analyzeWithLlm(text: string, timeoutMs = LLM_TIMEOUT_MS): Promise<LlmResult> {
   const provider = (process.env.LLM_PROVIDER || 'none').toLowerCase();
   if (provider === 'none') return { ok: false, reason: 'LLM_PROVIDER=none' };
   if (provider !== 'anthropic') return { ok: false, reason: `unknown provider ${provider}` };

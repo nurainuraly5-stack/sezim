@@ -1,10 +1,12 @@
-// POST /api/analyze — LLM-анализ текста (zod, таймаут 8 с) + oEmbed-метаданные ссылки на песню.
+// POST /api/analyze — LLM-анализ текста (zod, таймаут 9 с) + oEmbed-метаданные ссылки на песню.
 // Если LLM недоступен — { llm: null }, клиент работает на fallback-движке.
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { analyzeWithLlm } from '@/lib/server/llm';
 
 export const runtime = 'nodejs';
+// модель — до 9 с, oEmbed — до 3,5 с параллельно; явный предел не зависит от того, включён ли на Vercel Fluid compute
+export const maxDuration = 15;
 
 // llm:false — флаг «LLM выключен» с клиента (демо работы без LLM): модель не вызывается
 const Body = z.object({ text: z.string().max(8000).optional(), songUrl: z.string().url().max(500).optional(), llm: z.boolean().optional() });

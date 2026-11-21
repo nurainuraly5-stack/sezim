@@ -1,6 +1,7 @@
 // Клиентский конвейер: ввод → признаки → MoodProfile → StyleTokens + explain → сохранение.
 import type { AudioFeatures, DayEntry, PhotoFeatures, SongMeta, TextFeatures } from '@/core/types';
 import { analyzeTextFallback } from '@/core/analyze/text-fallback';
+import { mergeText, type LlmTextFeatures } from '@/core/analyze/merge-text';
 import { buildMood } from '@/core/mood';
 import { buildStyle } from '@/core/style-engine';
 import { hashString } from '@/core/color';
@@ -26,8 +27,9 @@ export function previewStyle(text: string, photo?: PhotoFeatures, audio?: AudioF
   return { text: tf, mood, ...buildStyle({ mood, text: tf, photo, audio, meta }) };
 }
 
+export { mergeText };
 export type AnalyzeResponse = {
-  llm: (Omit<TextFeatures, 'voiceStyle' | 'wordCount' | 'engine'> & { voicePace: 'slow' | 'mid' | 'fast' }) | null;
+  llm: LlmTextFeatures | null;
   llmReason?: string;
   songMeta: { title?: string; artist?: string } | null;
 };
@@ -53,19 +55,6 @@ export async function analyzeRemote(text: string, songUrl?: string): Promise<Ana
   } catch {
     return null;
   }
-}
-
-export function mergeText(fallback: TextFeatures, llm: AnalyzeResponse['llm']): TextFeatures {
-  if (!llm) return fallback;
-  return {
-    ...fallback,
-    valence: llm.valence, arousal: llm.arousal, warmth: llm.warmth, density: llm.density, contrast: llm.contrast,
-    daypart: llm.daypart, motifs: llm.motifs.length >= 3 ? llm.motifs : fallback.motifs,
-    warmMotifs: llm.warmMotifs, coldMotifs: llm.coldMotifs,
-    quote: llm.quote, title: llm.title.replace(/[«»"]/g, '').trim(),
-    voiceStyle: { pace: llm.voicePace, warmth: llm.warmth },
-    engine: 'llm',
-  };
 }
 
 /** Признаки текста сохранённого дня (для A/B): упрощённый анализ детерминирован, LLM-ответ берётся из кэша

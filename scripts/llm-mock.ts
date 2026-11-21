@@ -4,7 +4,7 @@
 // затем сервер Sezim с LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=mock ANTHROPIC_BASE_URL=http://127.0.0.1:8787.
 import { createServer, type Server } from 'node:http';
 
-export type MockMode = 'ok' | 'clamp' | 'badTitle' | 'badJson' | 'slow' | 'auth' | 'rate' | 'refusal' | 'error500';
+export type MockMode = 'ok' | 'clamp' | 'badTitle' | 'badJson' | 'slow' | 'auth' | 'rate' | 'refusal' | 'error500' | 'noMotifs';
 
 export const MOCK_REPLY = {
   valence: 0.62, arousal: 0.3, warmth: 0.81, density: 0.4, contrast: 0.55,
@@ -12,7 +12,7 @@ export const MOCK_REPLY = {
   quote: 'дома было тёплое какао', title: 'Какао после первого снега', voicePace: 'slow',
 };
 
-export function startMock(port = 0, slowMs = 9500): Promise<{ server: Server; url: string; setMode: (m: MockMode) => void; stats: () => { requests: number; lastBody?: unknown } }> {
+export function startMock(port = 0, slowMs = 11000): Promise<{ server: Server; url: string; setMode: (m: MockMode) => void; stats: () => { requests: number; lastBody?: unknown } }> {
   let mode: MockMode = 'ok';
   let requests = 0;
   let lastBody: unknown;
@@ -34,6 +34,7 @@ export function startMock(port = 0, slowMs = 9500): Promise<{ server: Server; ur
       switch (mode) {
         case 'ok': return message(JSON.stringify(MOCK_REPLY));
         case 'clamp': return message(JSON.stringify({ ...MOCK_REPLY, valence: 1.4, warmth: -0.2, motifs: [...MOCK_REPLY.motifs, 'лампа', 'окно', 'ветер', 'остановка'] }));
+        case 'noMotifs': return message(JSON.stringify({ ...MOCK_REPLY, motifs: [], warmMotifs: [], coldMotifs: [] }));
         case 'badTitle': return message(JSON.stringify({ ...MOCK_REPLY, title: 'Какао' }));
         case 'badJson': return message('{"valence": 0.5, "arousal": ');
         case 'slow': await new Promise((r) => setTimeout(r, slowMs)); if (!res.destroyed) message(JSON.stringify(MOCK_REPLY)); return;

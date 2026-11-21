@@ -1,7 +1,8 @@
 // Контракт LLM-анализа без ключа и сети: `npm run test:llm`.
 // Настоящий lib/server/llm.ts + настоящий Anthropic SDK, но API — локальный mock (scripts/llm-mock.ts).
 // Проверяет: валидный ответ проходит zod; значения вне 0..1 обрезаются; нарушение схемы / битый JSON / отказ /
-// 401 / 429 / 500 → { ok:false } (клиент уходит в «упрощённый анализ»); медленный ответ обрывается по таймауту 8 с;
+// 401 / 429 / 500 → { ok:false } (клиент уходит в «упрощённый анализ»); медленный ответ обрывается по таймауту 9 с;
+// пустые детали дня не отбрасывают ответ: название и оценки модели остаются, детали — из упрощённого анализа;
 // LLM_PROVIDER=none и пустой ключ — без запроса.
 // Что НЕ проверяет: качество ответа настоящей модели и совместимость с живым API (нужен ключ).
 import { startMock, MOCK_REPLY } from './llm-mock';
@@ -13,7 +14,9 @@ const mock = await startMock();
 process.env.ANTHROPIC_BASE_URL = mock.url;
 process.env.ANTHROPIC_API_KEY = 'mock-key';
 process.env.LLM_PROVIDER = 'anthropic';
-const { analyzeWithLlm } = await import('../lib/server/llm');
+const { analyzeWithLlm, LLM_TIMEOUT_MS } = await import('../lib/server/llm');
+const { mergeText } = await import('../core/analyze/merge-text');
+const { analyzeTextFallback } = await import('../core/analyze/text-fallback');
 const TEXT = 'Утром первый снег и серый ноябрь, холодно. Вечером дома было тёплое какао и плед.';
 
 mock.setMode('ok');
@@ -26,6 +29,16 @@ mock.setMode('clamp');
 r = await analyzeWithLlm(TEXT);
 ok(r.ok && r.data.valence === 1 && r.data.warmth === 0 && r.data.motifs.length === 6, 'вне 0..1 → обрезано до границ; мотивов > 6 → первые 6');
 
+mock.setMode('noMotifs');
+r = await analyzeWithLlm('Шёл снег.');
+ok(r.ok && r.data.title === MOCK_REPLY.title && r.data.valence === MOCK_REPLY.valence && r.data.motifs.length === 0, 'пустые детали → ответ принят: название и оценки модели на месте');
+if (r.ok) {
+  const fb = analyzeTextFallback('Утром шёл мокрый снег, в автобусе пахло мандаринами.');
+  const m = mergeText(fb, { ...r.data, voicePace: r.data.voicePace });
+  ok(m.engine === 'llm' && m.title === MOCK_REPLY.title && m.warmth === MOCK_REPLY.warmth && m.motifs.length > 0 && m.motifs.join() === fb.motifs.join(),
+    `после слияния: engine=llm, название модели, детали из упрощённого анализа (${m.motifs.join(', ')})`);
+}
+
 for (const [mode, reason] of [['badTitle', 'validation'], ['badJson', 'invalid json'], ['refusal', 'refusal'], ['auth', 'auth'], ['rate', 'rate limit'], ['error500', 'api 500']] as const) {
   mock.setMode(mode);
   r = await analyzeWithLlm(TEXT);
@@ -36,7 +49,7 @@ mock.setMode('slow');
 const t0 = performance.now();
 r = await analyzeWithLlm(TEXT);
 const dt = (performance.now() - t0) / 1000;
-ok(!r.ok && r.reason === 'timeout' && dt >= 7.9 && dt < 9, `ответ через 9,5 с → обрыв по таймауту за ${dt.toFixed(2)} с (reason: ${r.ok ? '—' : r.reason})`);
+ok(!r.ok && r.reason === 'timeout' && dt >= LLM_TIMEOUT_MS / 1000 - 0.1 && dt < LLM_TIMEOUT_MS / 1000 + 1, `ответ через 11 с → обрыв по таймауту за ${dt.toFixed(2)} с (reason: ${r.ok ? '—' : r.reason})`);
 
 const before = mock.stats().requests;
 process.env.LLM_PROVIDER = 'none';
