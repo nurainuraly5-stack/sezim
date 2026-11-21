@@ -2,7 +2,7 @@
 // A/B на экране дня: меняется одно — песня или текст, остальное как у дня. Обе версии считаются заново
 // одним движком (core/ab.ts), ничего не подставлено. Песня: другого дня (её сохранённый анализ), свой файл
 // (анализ в браузере) или ссылка (честная оценка/ручной темп). Текст: другого дня или свой (тот же анализ текста).
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AudioFeatures, DayEntry, SongMeta, TextFeatures } from '@/core/types';
 import { computeVariant, musicDiff, textDiff, type Variant } from '@/core/ab';
 import { TECHNIQUES } from '@/core/style-engine';
@@ -100,6 +100,13 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose,
   const [textDayId, setTextDayId] = useState<string>();
   const [otherFeatures, setOtherFeatures] = useState<Record<string, TextFeatures>>({});
   const [own, setOwn] = useState('');
+  // фокус в поле — без прокрутки: блок сам прокручивается к своему началу (autoFocus перебивал это и уводил страницу ниже)
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  // блок вставляется выше кнопки «Сравнить с другим текстом»: браузер держит кнопку на месте и уводит страницу вниз —
+  // прокручиваем к началу блока, когда он уже отрисован (до отрисовки прокрутка из страницы дня ничего не находила)
+  const rootRef = useRef<HTMLElement>(null);
+  useEffect(() => { rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, []);
+  useEffect(() => { if (kind === 'text' && textMode === 'own') ownRef.current?.focus({ preventScroll: true }); }, [kind, textMode]);
   const [ownPick, setOwnPick] = useState<TextPick>();
   const [ownBusy, setOwnBusy] = useState(false);
   useEffect(() => {
@@ -166,7 +173,7 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose,
   const song = kind === 'song';
 
   return (
-    <section className="card mt-6 flex flex-col gap-5 p-4 sm:p-5" aria-labelledby="ab-h" id="compare">
+    <section ref={rootRef} className="card mt-6 flex scroll-mt-24 flex-col gap-5 p-4 sm:p-5" aria-labelledby="ab-h" id="compare">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 id="ab-h" className="t-h3">{song ? S.compareTitle : S.compareTitleText}</h2>
@@ -236,7 +243,7 @@ export default function DayCompare({ day, others, mobile, kind, onKind, onClose,
           )}
           {textMode === 'own' && (
             <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); recalcOwn(); }}>
-              <textarea autoFocus className="field min-h-[7rem]" value={own} onChange={(e) => setOwn(e.target.value)} placeholder={S.ownTextPlaceholder} aria-label={S.pickOwnText} />
+              <textarea ref={ownRef} className="field min-h-[7rem]" value={own} onChange={(e) => setOwn(e.target.value)} placeholder={S.ownTextPlaceholder} aria-label={S.pickOwnText} />
               <div className="flex flex-wrap items-center gap-3">
                 <button className="btn" type="submit" disabled={ownBusy || !own.trim()}>{ownBusy ? S.recalcBusy : S.recalc}</button>
                 <p className="t-micro measure">{S.recalcHint}</p>
